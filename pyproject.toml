@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "chatcoder"
+version = "0.1.0"
+description = "AI-Native Development Assistant"
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "click",
+    "jinja2",
+    "rich"
+]
+
+[project.scripts]
+chatcoder = "chatcoder.cli:cli"
