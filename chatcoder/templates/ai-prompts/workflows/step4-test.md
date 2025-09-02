@@ -15,7 +15,6 @@
 
 ## 🎯 测试目标
 请生成以下内容：
-
 1. **单元测试**  
    - 覆盖核心逻辑
    - 包含正常路径与边界条件
@@ -34,6 +33,35 @@
 - 标注测试文件路径
 - 保持测试风格与项目一致
 - 不输出重复或冗余测试
+
+### 📋 单元测试格式示例
+{% if test_runner == "pytest" %}
+```python
+# 使用 pytest 风格
+# 示例：
+# def test_my_function():
+#     assert my_function("hello") == {"result": "hello"}
+```
+{% elif test_runner == "unittest" %}
+```python
+# 使用 unittest 风格
+# 示例：
+# class TestMyFunction(unittest.TestCase):
+#     def test_basic(self):
+#         self.assertEqual(my_function("hello"), {"result": "hello"})
+```
+{% elif test_runner == "gtest" %}
+```cpp
+// 使用 Google Test
+// 示例：
+// TEST(MyFunctionTest, Basic) {
+//   EXPECT_EQ(MyFunction("hello"), "hello");
+// }
+```
+{% else %}
+# 请使用 {{ test_runner }} 编写测试
+```
+{% endif %}
 
 ## 🚫 禁止行为
 - 不得修改生产代码

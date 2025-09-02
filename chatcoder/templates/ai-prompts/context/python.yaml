@@ -1,0 +1,8 @@
+# display: Python
+project_name: "{{ project_name }}"
+project_language: python
+project_type: {{ project_type }}
+framework: {{ framework|default('') }}
+test_runner: pytest
+code_style: black
+format_tool: ruff

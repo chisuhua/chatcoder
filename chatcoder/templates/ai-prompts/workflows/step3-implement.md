@@ -8,8 +8,7 @@
 ## 📌 设计依据
 {% if previous_task %}
 - **基于设计任务**: `{{ previous_task.task_id }}`
-- **设计摘要**:  
-  {{ previous_task.description }}
+- **设计摘要**: {{ previous_task.description }}
 {% else %}
 - 无前序设计，需自行完成模块划分与接口定义。
 {% endif %}
@@ -27,24 +26,32 @@
    - 核心算法或流程的简要注释
    - 重要决策的 rationale
 
-## 📋 输出格式示例
-### src/user_service.py
-```python
-def create_user(username: str) -> User:
-    # 实现逻辑
-    pass
-```
 
-### tests/test_user.py
+### 📋 输出格式示例
+{% if project_language == "python" %}
 ```python
-def test_create_user():
-    # 测试逻辑
-    pass
+# 请使用 Python 3.8+ 语法，遵循 PEP8 / Black 风格
+# 示例：
+# def my_function(param: str) -> dict:
+#     return {"result": param}
 ```
+{% elif project_language == "c++" %}
+```cpp
+// 请使用 C++17 语法，遵循 Google C++ Style Guide
+// 示例：
+// std::string MyFunction(const std::string& param) {
+//   return param;
+// }
+```
+{% else %}
+```{{ project_language }}
+// 请使用 {{ project_language }} 实现功能
+```
+{% endif %}
 
 ## 🚫 禁止行为
 - 不得修改与本功能无关的代码
 - 不得引入新依赖（除非已在设计阶段声明）
 - 不得忽略类型检查或格式化规则
-- 不得输出解释性文本（标题和注释除外）
+- 必须遵循 `{{ code_style }}` 格式规范
 

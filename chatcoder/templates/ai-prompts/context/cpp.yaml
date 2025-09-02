@@ -1,0 +1,9 @@
+# display: C++
+project_name: "{{ project_name }}"
+project_language: c++
+project_type: {{ project_type }}
+framework: {{ framework|default('') }}
+build_system: cmake
+test_runner: gtest
+format_tool: clang-format
+cpp_standard: "C++17"

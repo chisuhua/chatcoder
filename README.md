@@ -55,3 +55,27 @@ chatcoder confirm auth-design-v1
 3. ✅ `chatcoder init` 命令
 4. ✅ `core/context.py` 的上下文解析
 
+
+### ✅ 模板设计原则总结
+
+| 模板 | 核心目标 | 通用性保障 |
+|------|----------|-----------|
+| `step1-analyze` | 需求澄清与边界定义 | 不假设技术栈 |
+| `step2-design` | 架构与接口设计 | 不强制语言语法 |
+| `step3-implement` | 代码生成 | 仅输出变更 |
+| `step4-test` | 测试覆盖 | 适配主流测试框架 |
+| `step5-summary` | 变更归档 | 支持人工审查 |
+
+chatcoder/
+├── core/
+│   ├── prompt.py          ← 当前文件
+│   ├── context.py         ← 提供 generate_context_snapshot()
+│   └── ...
+├── ai-prompts/
+│   └── workflows/
+│       ├── step-analyze.md
+│       ├── step-design.md
+│       ├── step-implement.md  ← 支持 {{ project_language }} 条件渲染
+│       ├── step-test.md       ← 支持 {{ test_runner }} 条件渲染
+│       └── step-summary.md
+└── utils/console.py       ← 提供 console 输出
