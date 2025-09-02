@@ -19,7 +19,8 @@ from chatcoder.core.state import (
     load_task_state,
     save_task_state,
     generate_task_id,
-    list_task_states
+    list_task_states,
+    get_task_file_path
 )
 
 
@@ -121,6 +122,15 @@ def prompt(template, description, after, output):
             error(f"前置任务不存在: {after}")
             return
 
+        # ✅ 新增：检查任务状态是否可继承
+        status = previous_task.get("status", "pending")
+        if status != "confirmed":
+            error(f"❌ 前序任务 {after} 状态为 '{status}'，必须是 'confirmed'")
+            warning("提示：请先人工审核任务内容，或使用 state-confirm <task_id> 标记为确认")
+            return
+
+        success(f"✅ 使用已确认任务作为上下文: {after}")
+
     # 3. 生成当前任务 ID
     task_id = generate_task_id()
     info(f"当前任务 ID: {task_id}")
@@ -151,10 +161,41 @@ def prompt(template, description, after, output):
     except Exception as e:
         error(f"生成失败: {e}")
 
+@cli.command(name="state-confirm")
+@click.argument("task_id")
+def state_confirm(task_id):
+    """标记任务为已确认"""
+    task_file = get_task_file_path(task_id)
+    if not task_file.exists():
+        error(f"任务不存在: {task_id}")
+        return
 
-# ------------------------------
-# 命令 4: state-ls - 列出所有任务
-# ------------------------------
+    try:
+        with open(task_file, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        # 获取当前状态
+        current_status = data.get("status", "pending")
+
+        # 如果已经是 confirmed，提示用户
+        if current_status == "confirmed":
+            warning(f"⚠️  任务 {task_id} 已是 'confirmed' 状态，无需重复确认。")
+            console.print_json(data=data)
+            return
+
+        # 更新状态
+        data["status"] = "confirmed"
+        data["confirmed_at"] = datetime.now().isoformat()
+        data["confirmed_at_str"] = datetime.now().strfftime("%Y-%m-%d %H:%M:%S")
+
+        with open(task_file, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+
+        success(f"✅ 任务 {task_id} 已标记为 confirmed")
+
+    except Exception as e:
+        error(f"确认失败: {e}")
+
 
 @cli.command(name="state-ls")
 def state_ls():
