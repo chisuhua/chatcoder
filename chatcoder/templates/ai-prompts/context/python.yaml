@@ -1,8 +1,15 @@
-# display: Python
-project_name: "{{ project_name }}"
+# chatcoder/ai-prompts/templates/context/python.yaml
+project_name: {{ project_name }}
 project_language: python
 project_type: {{ project_type }}
-framework: {{ framework|default('') }}
+framework: {{ framework | default("none") }}
+ui_library: {{ ui_library | default("none") }}
 test_runner: pytest
-code_style: black
-format_tool: ruff
+format_tool: black
+linter: flake8
+package_manager: pip
+virtual_env: venv/
+project_description: >-
+  一个使用 Python 开发的 {{ project_type }} 应用。
+  框架: {{ framework if framework else "无" }}。
+  UI 库: {{ ui_library if ui_library else "无" }}。

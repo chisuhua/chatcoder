@@ -1,0 +1,23 @@
+# 📊 任务总结与归档
+
+{% include "common/context.md.j2" %}
+
+## 📝 原始需求
+{{ description }}
+
+
+## 📌 任务链
+{% if previous_task %}
+- **最终实现基于**: `{{ previous_task.task_id }}`
+- **变更摘要**: {{ previous_task.description }}
+{% else %}
+- 无前序任务，需总结全部变更。
+{% endif %}
+
+## 🎯 输出目标
+请生成以下内容：
+请生成一份简洁的 PR 描述，包含：
+- 变更摘要
+- 影响范围
+- 部署建议
+- 后续任务建议

@@ -1,9 +1,19 @@
-# display: C++
-project_name: "{{ project_name }}"
+# chatcoder/ai-prompts/templates/context/cpp.yaml
+
+project_name: {{ project_name }}
 project_language: c++
 project_type: {{ project_type }}
 framework: {{ framework|default('') }}
-build_system: cmake
+build_system: {{ cmake | default("make") }}
 test_runner: gtest
-format_tool: clang-format
+compiler: gcc or clang
 cpp_standard: "C++17"
+package_manager: conan or vcpkg
+test_framework: googletest
+format_tool: clang-format
+linter: clang-tidy
+debugger: gdb/lldb
+project_description: >-
+  一个使用 C++ 开发的 {{ project_type }} 项目。
+  编译系统: {{ framework if framework else "Makefile" }}。
+  遵循 C++17 标准，注重性能与内存安全。

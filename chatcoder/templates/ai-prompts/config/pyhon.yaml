@@ -1,0 +1,26 @@
+# .chatcoder/config.yaml - Python 项目配置
+project:
+  language: python
+  type: {{ project_type }}
+  framework: {{ framework | default("") }}
+
+# 核心文件匹配模式（glob 语法）
+core_patterns:
+  - "**/models.py"
+  - "**/views.py"
+  - "**/routers/*.py"
+  - "**/api/*.py"
+  - "**/schemas.py"
+  - "**/main.py"
+  - "**/app.py"
+
+# 可选：排除路径
+exclude_patterns:
+  - "**/migrations/**"
+  - "**/__pycache__/**"
+  - "**/venv/**"
+  - "**/env/**"
+
+# LLM 提示词配置（未来扩展）
+prompts:
+  default: "请基于项目结构提供建议"

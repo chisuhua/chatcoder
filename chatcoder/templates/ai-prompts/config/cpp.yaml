@@ -1,0 +1,22 @@
+# .chatcoder/config.yaml - C++ 项目配置
+project:
+  language: cpp
+  type: {{ project_type }}
+  build_system: {{ framework | default("cmake") }}
+
+core_patterns:
+  - "**/*.cpp"
+  - "**/*.h"
+  - "**/*.hpp"
+  - "src/**"
+  - "include/**"
+  - "CMakeLists.txt"
+
+exclude_patterns:
+  - "**/build/**"
+  - "**/cmake-build-*/"
+  - "**/.vscode/**"
+  - "**/vendor/**"
+
+prompts:
+  default: "请以 C++ 最佳实践分析代码"

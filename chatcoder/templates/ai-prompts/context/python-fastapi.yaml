@@ -1,0 +1,16 @@
+# chatcoder/ai-prompts/templates/context/python-fastapi.yaml
+project_name: {{ project_name }}
+project_language: python
+project_type: web
+framework: fastapi
+asgi_server: uvicorn
+api_docs: swagger/redoc
+orm: sqlalchemy or tortoise-orm
+test_runner: pytest
+format_tool: ruff
+linter: ruff
+dependency_injection: yes
+asyncio: true
+project_description: >-
+  一个基于 FastAPI 的异步 Web API 项目。
+  使用 Pydantic 进行数据校验，支持 OpenAPI 和 JSON Schema。

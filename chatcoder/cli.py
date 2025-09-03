@@ -12,7 +12,7 @@ from chatcoder.utils.console import (
     console, info, success, warning, error,
     heading, show_welcome, confirm
 )
-from chatcoder.core.init import init_project
+from chatcoder.core.init import (init_project, validate_config)
 from chatcoder.core.prompt import render_prompt
 from chatcoder.core.context import generate_context_snapshot
 from chatcoder.core.state import (
@@ -23,26 +23,6 @@ from chatcoder.core.state import (
     get_task_file_path
 )
 
-
-# ------------------------------
-# 模板别名映射（支持自动发现 + 别名）
-# ------------------------------
-
-def resolve_template_path(template: str) -> str:
-    """解析模板路径：支持别名 + 自动补全"""
-    ALIASES = {
-        'feature': 'workflows/feature.md',
-        'analyze': 'workflows/step1-analyze.md',
-        'design': 'workflows/step2-design.md',
-        'implement': 'workflows/step3-implement.md',
-        'test': 'workflows/step4-test.md',
-        'summary': 'workflows/step5-summary.md',
-    }
-    if template in ALIASES:
-        template = ALIASES[template]
-    if not template.startswith("ai-prompts/"):
-        template = f"ai-prompts/{template}"
-    return template
 
 
 # ------------------------------
@@ -86,13 +66,39 @@ def init():
 @cli.command()
 def context():
     """📚 查看项目上下文"""
-    from chatcoder.core.context import parse_context_file
+    click.echo("🔍 正在生成上下文快照...\n")
+
     try:
-        ctx = parse_context_file()
-        console.print("[bold]📊 项目上下文:[/bold]")
-        console.print_json(ctx)
+        snapshot = generate_context_snapshot()
+
+        # 输出核心字段
+        keys_to_show = [
+            "project_name",
+            "project_language",
+            "project_type",
+            "framework",
+            "test_runner",
+            "format_tool",
+            "core_files",
+            "context_snapshot"
+        ]
+
+        for key in keys_to_show:
+            value = snapshot.get(key)
+            if key == "context_snapshot":
+                click.echo(value)  # Markdown 格式直接输出
+            elif key == "core_files":
+                if value:
+                    click.echo(f"\n## 🔍 扫描到 {len(value)} 个核心文件")
+                    for filepath in sorted(value.keys()):
+                        info = value[filepath]
+                        click.echo(f"  📄 {filepath} (hash:{info['hash']})")
+            elif value:
+                click.echo(f"🔹 {key}: {value}")
+
     except Exception as e:
-        error(f"读取失败: {e}")
+        click.echo(click.style(f"❌ 生成上下文失败: {e}", fg="red"))
+        raise click.Abort()
 
 
 # ------------------------------
@@ -109,10 +115,10 @@ def prompt(template, description, after, output):
     heading(f"生成提示词: {template}")
 
     # 1. 解析模板路径
-    template_path = resolve_template_path(template)
-    if not Path(template_path).exists():
-        error(f"模板不存在: {template_path}")
-        return
+    #template_path = resolve_template_path(template)
+    #if not Path(template_path).exists():
+    #    error(f"模板不存在: {template_path}")
+    #    return
 
     # 2. 加载前置任务（可选）
     previous_task = None
@@ -138,7 +144,7 @@ def prompt(template, description, after, output):
     try:
         # 4. 渲染提示词
         rendered = render_prompt(
-            template_path=template_path,
+            template_path=template,
             description=description or "",
             previous_task=previous_task
         )
@@ -256,6 +262,17 @@ def status():
     """📊 查看当前协作状态（待实现）"""
     warning("该命令将在后续版本实现")
 
+
+@cli.command(name="validate")
+def config_validate():
+    """验证 config.yaml 是否合法"""
+    validate_config()
+
+@cli.command()
+def debug_context():
+    """调试：打印当前上下文"""
+    from chatcoder.core.context import debug_print_context
+    debug_print_context()
 
 # ------------------------------
 # 主入口

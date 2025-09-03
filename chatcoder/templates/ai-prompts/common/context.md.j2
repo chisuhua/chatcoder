@@ -1,0 +1,22 @@
+<!-- ai-prompts/common/context.md.j2 -->
+
+## 🧩 项目上下文
+- **项目名称**: {{ project_name or "unknown" }}
+- **语言**: {{ project_language or "unknown" }}
+- **类型**: {{ project_type or "unknown" }}
+{% if detected_type %}- **探测结果**: {{ detected_type }}{% endif %}
+{% if framework %}- **框架**: {{ framework }}{% endif %}
+{% if test_runner %}- **测试工具**: {{ test_runner }}{% endif %}
+{% if format_tool %}- **格式化工具**: {{ format_tool }}{% endif %}
+
+{% if core_files %}
+## 📂 核心代码摘要（{{ core_files.keys() | length }} 个文件）
+> 💡 以下为项目关键模块，分析/设计/编码时请保持风格一致。
+{% for filepath, info in core_files.items() %}
+### `{{ filepath }}`
+```{{ filepath.split('.')[-1] }}
+{{ info.snippet }}
+```
+{% endfor %}
+{% endif %}
+

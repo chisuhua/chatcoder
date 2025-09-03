@@ -1,0 +1,16 @@
+# chatcoder/ai-prompts/templates/context/python-django.yaml
+project_name: {{ project_name }}
+project_language: python
+project_type: web
+framework: django
+database: postgresql
+orm: django-orm
+api_style: djangorestframework
+test_runner: pytest
+format_tool: black
+linter: flake8
+static_files: collectstatic
+deployment: gunicorn + nginx
+project_description: >-
+  一个 Django Web 项目，用于构建后端服务。
+  使用 PostgreSQL 作为数据库，Django REST Framework 提供 API 接口。
