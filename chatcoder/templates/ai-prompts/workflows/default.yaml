@@ -1,0 +1,32 @@
+# workflows/default.yaml
+name: default
+description: Standard development workflow
+phases:
+  - name: analyze
+    title: 需求分析
+    template: analyze
+    description: 明确需求范围和边界
+  - name: design
+    title: 架构设计
+    template: design
+    description: 设计系统结构和接口
+  - name: code
+    title: 编码实现
+    template: code
+    description: 实现核心逻辑
+  - name: test
+    title: 测试验证
+    template: test
+    description: 编写测试用例
+  - name: review
+    title: 代码审查
+    template: review
+    description: 团队审查代码
+  - name: deploy
+    title: 部署上线
+    template: deploy
+    description: 部署到生产环境
+  - name: done
+    title: 完成
+    template: summary
+    description: 总结和归档

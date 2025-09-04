@@ -1,0 +1,27 @@
+name: ai-agent
+description: Autonomous AI agent workflow
+phases:
+  - name: analyze
+    title: 问题分析
+    template: analyze
+  - name: plan
+    title: 行动规划
+    template: plan
+  - name: think
+    title: 深度推理
+    template: think
+  - name: code
+    title: 编码实现
+    template: code
+  - name: reflect
+    title: 自我反思
+    template: reflect
+  - name: test
+    title: 测试验证
+    template: test
+  - name: deploy
+    title: 部署执行
+    template: deploy
+  - name: done
+    title: 任务完成
+    template: summary

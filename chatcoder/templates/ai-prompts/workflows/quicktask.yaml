@@ -1,0 +1,15 @@
+name: quick-task
+description: Simple workflow for quick tasks
+phases:
+  - name: plan
+    title: 计划
+    template: plan
+  - name: code
+    title: 实现
+    template: code
+  - name: test
+    title: 测试
+    template: test
+  - name: done
+    title: 完成
+    template: summary
