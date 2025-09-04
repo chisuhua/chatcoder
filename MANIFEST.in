@@ -1,0 +1,6 @@
+# MANIFEST.in
+include README.md
+include LICENSE
+recursive-include chatcoder/ai-prompts *.j2
+recursive-include chatcoder/ai-prompts *.md.j2
+recursive-include chatcoder/ai-prompts *.txt.j2
