@@ -84,6 +84,8 @@ class WorkflowEngine:
             Optional[str]: 下一个阶段名称，如果已是最后一个阶段则返回 None。
         """
         order = self.get_phase_order(schema)
+        print(current_phase)
+        print(order)
         if current_phase not in order:
             # 如果当前阶段不在 schema 中，返回第一个阶段
             return schema["phases"][0]["name"] if schema["phases"] else None

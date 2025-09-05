@@ -58,14 +58,22 @@ def detect_project_type(root: Path = Path(".")) -> str:
     return "unknown"
 
 # ==================== 私有实现 ====================
-
 def _matches_rules(root: Path, rules: List[Dict]) -> bool:
-    """检查是否匹配所有 required 规则"""
+    """检查是否匹配规则组：所有 required 规则必须匹配，且至少一个规则匹配。"""
+    at_least_one_matched = False
     for rule in rules:
-        if not _rule_matches(root, rule):
+        if _rule_matches(root, rule):
+            at_least_one_matched = True # 标记至少有一个规则匹配
+            # 注意：即使匹配了，也要继续检查所有 required 规则
+        else:
+            # 如果规则不匹配
             if rule.get("required", False):
+                # 如果是必需的，则整个组不匹配
                 return False
-    return True
+    # 循环结束：
+    # 1. 所有 required 规则都已检查且通过 (否则已 return False)
+    # 2. at_least_one_matched 标记了是否有至少一个规则匹配
+    return at_least_one_matched # 只有当至少一个规则匹配时才返回 True
 
 def _rule_matches(root: Path, rule: Dict) -> bool:
     """检查单个规则是否匹配"""

@@ -879,3 +879,112 @@ chatcoder prompt security-review "AuthService"
 这套系统不仅能提升 AI 输出质量，更能**重塑你的开发流程**，让 AI 成为真正可信的“虚拟团队成员”。
 
 你现在拥有的，不再是一组 prompt，而是一个 **AI 协作操作系统**。
+好的，作为一名资深AI应用架构师，考虑到您希望 ChatCoder 成为一个像瑞士军刀一样提升个人生产力的工具，并且需要支持根据AI响应自动修改本地文件并在人工确认后应用的功能，我将对之前的架构设计进行补充，并提供一个针对性的分阶段改造计划。
+
+**架构设计补充与更新**
+
+在您之前提供的架构基础上，我们需要进行以下补充和细化：
+
+1.  **增强 AI 交互层 (AI Interaction Layer)**:
+    *   **响应解析器 (Response Parser)**: 这是关键新增模块。它需要能够解析AI的文本输出，识别其中包含的代码片段、文件路径、以及潜在的修改意图（新增、修改、删除）。这可能需要定义一种简单的约定或使用更高级的解析技术（如正则表达式、甚至小型的DSL解析器）。
+    *   **变更集生成器 (ChangeSet Generator)**: 基于解析器的输出，生成一个结构化的“变更集”（ChangeSet）。这个变更集应包含：目标文件路径、操作类型（新增/修改/删除）、新内容（对于新增/修改）或要删除的行/块（对于删除）、以及可能的变更描述。
+    *   **变更应用器 (Change Applier)**: 负责将变更集安全地应用到本地文件系统。这需要非常谨慎，最好支持：
+        *   **Dry-run 模式**: 仅展示将要进行的更改，而不实际执行。
+        *   **备份机制**: 在应用更改前，自动备份被修改的文件。
+        *   **冲突检测**: 检查自AI生成响应以来，目标文件是否已被用户手动修改，以避免覆盖。
+
+2.  **增强人机交互层 (Human Interaction)**:
+    *   **变更预览器 (Change Previewer)**: 在人工确认前，清晰地展示AI建议的文件更改。这可以通过生成差异（diff）视图、高亮显示新增/修改的代码块、或生成临时的HTML/Markdown报告来实现。
+    *   **确认与应用接口**: `state-confirm` 命令需要扩展。当用户确认一个包含文件更改建议的任务时，它应该触发 `Change Applier` 来应用这些更改。
+
+3.  **增强状态持久化层 (State Persistence)**:
+    *   **变更集存储**: 任务状态（`Task State`）需要扩展，以存储AI生成的原始响应以及解析出的结构化变更集。这使得在确认阶段可以重新访问和应用这些变更。
+
+4.  **核心流程更新**:
+    *   **任务执行流程 (增强)**:
+        1.  用户请求 -> CLI 解析 -> 任务编排器创建/获取任务 -> 上下文管理器准备上下文 -> AI 交互层生成提示词 -> 调用 AI -> **AI 交互层解析响应 -> 生成并存储变更集** -> 更新上下文/任务状态（含变更集）-> **人机交互（预览变更）** -> **人工审核（确认应用变更）** -> **变更应用器应用变更** -> 保存最终状态。
+    *   **智能工作流决策流程**: 保持不变，但决策依据可以更丰富，例如，如果AI响应包含大量代码，则可能触发一个“代码审查”阶段。
+
+5.  **安全与备份机制**:
+    *   **全局配置**: 在 `.chatcoder/config.yaml` 中增加配置项，如 `auto_backup: true/false`, `backup_dir: .chatcoder/backups`, `dry_run_default: true/false`。
+    *   **版本控制集成 (可选)**: 如果项目使用Git，可以在应用更改前后自动创建提交或暂存更改，方便用户回滚。
+
+**分阶段改造计划 (针对新功能)**
+
+**阶段 0: 准备与规划 (可与阶段1并行)**
+
+*   **目标**: 明确文件修改功能的具体需求、设计解析规则、确定变更存储格式。
+*   **任务**:
+    1.  **需求细化**: 明确AI输出中哪些内容应被视为文件修改建议（例如，被特定代码块标记包裹的内容，或遵循特定注释格式的内容）。
+    2.  **解析规则设计**: 设计 `Response Parser` 的解析逻辑。例如，定义一个约定：AI必须将代码放在特定路径的代码块中，如 ```python:src/my_module.py 或 ```diff:src/my_module.py。
+    3.  **变更集格式定义**: 定义 `ChangeSet` 的数据结构（例如，JSON或Python字典）。示例：
+        ```json
+        {
+          "changes": [
+            {
+              "file_path": "src/my_module.py",
+              "operation": "modify", // or "create", "delete"
+              "new_content": "...", // For create/modify
+              "description": "Implemented the core logic for feature X"
+            },
+            {
+              "file_path": "tests/test_my_module.py",
+              "operation": "create",
+              "new_content": "...",
+              "description": "Added unit tests for the new logic"
+            }
+          ]
+        }
+        ```
+    4.  **备份策略**: 设计备份机制，确定备份文件的命名规则和存储位置。
+
+**阶段 1: 架构重构与模块解耦 (同之前)**
+
+*   **目标**: 建立清晰的模块边界，为新增功能打下基础。
+*   **任务**:
+    1.  **服务层抽象**: (同之前) 将 `core/state.py`, `core/workflow.py`, `core/prompt.py` 的逻辑抽象为 `TaskOrchestrator`, `WorkflowEngine`, `AIInteractionManager` 类。
+    2.  **上下文管理增强**: (同之前) 整合 `core/context.py` 和 `core/detector.py` 到 `ContextManager` 类。
+    3.  **状态持久化接口**: (同之前) 定义 `StateManager` 接口。
+    4.  **CLI 重构**: (同之前) 修改 `cli.py`，使其依赖服务类实例。
+    5.  **状态机引入**: (同之前) 为 `Task` 对象引入明确的状态机。
+    6.  **变更集存储**: 修改 `Task` 状态数据结构，在 `save_task_state` 中预留存储 `change_set` 的字段。
+
+**阶段 2: AI响应解析与变更集生成 (核心新增)**
+
+*   **目标**: 实现从AI文本响应中提取文件修改建议并生成变更集的功能。
+*   **任务**:
+    1.  **创建 `ResponseProcessor` 模块**: 在 `core/` 目录下创建新模块，例如 `core/processor.py`。
+    2.  **实现 `ResponseParser`**: 编写解析逻辑，读取AI的 `rendered` 输出，根据预定义规则提取文件路径、内容和操作类型。
+    3.  **实现 `ChangeSetGenerator`**: 将解析出的信息组织成预定义的 `ChangeSet` 格式。
+    4.  **集成到 `AIInteractionManager`**: 修改 `render_prompt` 或在其后增加一步，调用 `ResponseProcessor` 来解析响应并生成变更集。
+    5.  **更新状态存储**: 修改 `save_task_state` 的调用，将生成的 `change_set` 作为 `context` 或一个新字段存入任务状态文件。
+
+**阶段 3: 变更应用与人机交互增强 (核心新增)**
+
+*   **目标**: 实现安全地预览和应用AI建议的文件更改。
+*   **任务**:
+    1.  **创建 `ChangeApplier` 模块**: 在 `core/` 目录下创建，例如 `core/applier.py`。
+    2.  **实现 `ChangePreviewer`**: 创建一个函数或类，能够读取任务状态中的 `change_set`，并以用户友好的方式（如diff格式、代码高亮的报告）展示即将进行的更改。可以考虑在 `cli.py` 中添加一个子命令，如 `chatcoder task preview-changes <task_id>`。
+    3.  **实现 `ChangeApplier`**: 编写应用更改的逻辑。
+        *   **备份**: 在修改文件前，将其复制到备份目录。
+        *   **应用**: 根据 `change_set` 中的操作类型（create, modify, delete）执行相应文件系统操作。
+        *   **Dry-run**: 实现一个模式，只打印将要执行的操作而不实际执行。
+        *   **冲突检测 (基础)**: 检查文件是否存在。更复杂的基于内容的冲突检测可在后续阶段添加。
+    4.  **增强 `state-confirm` 命令**: 修改 `cli.py` 中的 `state_confirm` 函数。
+        *   加载任务状态，检查是否存在 `change_set`。
+        *   如果存在，调用 `ChangePreviewer` 展示更改。
+        *   询问用户确认。
+        *   如果用户确认，则调用 `ChangeApplier` 应用更改。
+        *   更新任务状态为 `confirmed`，并可选地记录应用时间或备份信息。
+
+**阶段 4: 配置、优化与扩展 (完善)**
+
+*   **目标**: 提升工具的易用性、安全性和可配置性。
+*   **任务**:
+    1.  **配置驱动**: 在 `.chatcoder/config.yaml` 中添加相关配置项，如 `auto_apply_changes: true/false` (默认false更安全), `backup_enabled: true/false`, `backup_dir: path`。
+    2.  **增强冲突检测**: 实现更智能的冲突检测，例如，检查文件的最后修改时间或内容哈希，确保AI生成响应后文件未被手动更改。
+    3.  **撤销机制**: 考虑实现一个简单的撤销功能，利用备份文件恢复到应用更改前的状态。可以添加 `chatcoder task undo <task_id>` 命令。
+    4.  **性能与错误处理**: 优化解析和应用逻辑，添加更完善的错误处理和日志记录。
+    5.  **用户体验**: 改进 `ChangePreviewer` 的输出格式，使其更清晰易读。
+
+这个更新后的计划将引导 ChatCoder 从一个提示词生成工具，发展成为一个能够深度集成到您的个人开发工作流中，通过AI建议直接辅助您编写和修改代码的强大生产力工具。

@@ -21,7 +21,6 @@ TEMPLATES_DIR = PROJECT_ROOT / "ai-prompts"
 # 从 prompt.py 复制的别名映射
 ALIASES = {
     'context': 'common/context.md.j2',
-    'feature': 'workflows/feature.md.j2',
     'analyze': 'workflows/step1-analyze.md.j2',
     'design': 'workflows/step2-design.md.j2',
     'implement': 'workflows/step3-code.md.j2', # 注意：模板名是 code
@@ -208,6 +207,7 @@ class AIInteractionManager:
         search_dirs = ["common", "workflows"]
         for dname in search_dirs:
             search_path = TEMPLATES_DIR / dname
+            print(search_path)
             if not search_path.exists():
                 continue
             for file in search_path.rglob("*.j2"):

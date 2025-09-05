@@ -22,11 +22,7 @@ phases:
     title: 代码审查
     template: review
     description: 团队审查代码
-  - name: deploy
-    title: 部署上线
-    template: deploy
-    description: 部署到生产环境
-  - name: done
+  - name: summary
     title: 完成
     template: summary
     description: 总结和归档
