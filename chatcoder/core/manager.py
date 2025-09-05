@@ -10,11 +10,9 @@ from typing import Dict, Any, Optional, List, Tuple
 import jinja2
 
 from ..utils.console import console
-from .context import generate_context_snapshot
+from .context import generate_context_snapshot # 确保导入了更新后的函数
 
 # 📁 模板根目录（相对于当前文件）
-# PROJECT_ROOT = Path(__file__).parent.parent.parent # 与 prompt.py 保持一致
-# 为了减少依赖，直接基于 __file__ 计算
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 TEMPLATES_DIR = PROJECT_ROOT / "ai-prompts"
 
@@ -95,7 +93,7 @@ class AIInteractionManager:
             template (str): 模板名称或路径（支持别名）。
             description (str): 任务描述。
             previous_task (Optional[Dict[str, Any]]): 前置任务状态。
-            **kwargs: 其他传递给模板的上下文变量。
+            **kwargs: 其他传递给模板的上下文变量。如果包含 'phase'，将用于动态上下文。
 
         Returns:
             str: 渲染后的提示词内容。
@@ -143,8 +141,10 @@ class AIInteractionManager:
             env = self._create_jinja_env()
             jinja_template = env.get_template(rel_path_forward)
 
-            # 4. 生成核心上下文
-            context = generate_context_snapshot()
+            # 从 kwargs 中获取 'phase' 参数，传递给 generate_context_snapshot
+            current_phase = kwargs.get('phase')
+            context = generate_context_snapshot(phase=current_phase) # 新的调用方式
+            
             context.update(kwargs)  # 合并额外参数
 
             # 5. 注入核心变量
@@ -207,7 +207,6 @@ class AIInteractionManager:
         search_dirs = ["common", "workflows"]
         for dname in search_dirs:
             search_path = TEMPLATES_DIR / dname
-            print(search_path)
             if not search_path.exists():
                 continue
             for file in search_path.rglob("*.j2"):
@@ -247,8 +246,10 @@ class AIInteractionManager:
             console.print(preview_content)
             console.print("[dim]" + "-" * 60 + "[/dim]")
 
-            # 3. 生成上下文快照
-            context = generate_context_snapshot()
+            # 3. 生成上下文快照 (修改点：尝试传递 phase 进行调试)
+            # 为了调试，我们可以假设一个 phase，或者从 extra_context 获取
+            debug_phase = extra_context.get('phase', 'debug_phase') # 默认值
+            context = generate_context_snapshot(phase=debug_phase) # 调试时也传递 phase
             context.update(extra_context)
             context.update({
                 "description": "这是一条调试任务描述",
@@ -270,7 +271,8 @@ class AIInteractionManager:
 
             # 4. 渲染
             console.print(f"\n[bold]✨ 正在渲染...[/bold]")
-            rendered = self.render_prompt(template, context["description"], context["previous_task"])
+            # 注意：这里调用自身方法，也会传递 kwargs（包括可能的 phase）
+            rendered = self.render_prompt(template, context["description"], context["previous_task"], **extra_context)
             console.print(f"\n[bold green]✅ 渲染成功！结果:[/bold green]")
             console.print("[bold]" + "=" * 60 + "[/bold]")
             # 限制输出长度以避免刷屏

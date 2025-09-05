@@ -19,6 +19,18 @@ DEFAULT_CONTEXT = {
     "project_description": "未提供项目描述"
 }
 
+PHASE_SPECIFIC_PATTERNS = {
+    # 分析和设计阶段：关注项目结构、模型、接口定义、配置
+    "analyze": ["**/models.py", "**/schemas.py", "**/interfaces.py", "**/types.py", "**/config.py", "**/settings.py"],
+    "design": ["**/interfaces.py", "**/abstract*.py", "**/base*.py", "**/models.py", "**/schemas.py", "**/api/*.py"],
+    # 实现阶段：关注工具函数、辅助类、核心业务逻辑、以及可能被修改的文件
+    "implement": ["**/utils.py", "**/helpers.py", "**/common/*.py", "**/lib/*.py", "**/services/*.py", "**/core/*.py"],
+    # 测试阶段：关注测试文件和被测试的实现
+    "test": ["**/tests/**/*", "**/*test*.py", "**/test_*.py", "**/spec/**/*"],
+    # 通用阶段或其他未指定阶段
+    # "default": [...] # 可以定义，但下面的逻辑会回退到 CORE_PATTERNS
+}
+
 CORE_PATTERNS = {
     "python": ["**/*.py"],
     "python-django": ["**/models.py", "**/views.py", "**/apps.py"],
@@ -74,10 +86,15 @@ def load_core_patterns_from_config() -> Optional[List[str]]:
         return None
 
 
-def generate_context_snapshot() -> Dict[str, Any]:
+def generate_context_snapshot(phase: Optional[str] = None): # 新的
     """
     生成上下文快照，用于模板渲染。
+
+    Args:
+        phase (Optional[str]): 当前任务的阶段 (e.g., 'analyze', 'design', 'implement').
+                               用于动态调整上下文内容。
     """
+    # --- 修改点结束 ---
     try:
         ctx = parse_context_file()
 
@@ -93,15 +110,23 @@ def generate_context_snapshot() -> Dict[str, Any]:
         else:
             snapshot += "- 无上下文信息"
 
-        # === 2. 智能识别项目类型并扫描核心文件 ===
         project_type = detect_project_type()
         # print(f"[DEBUG] Detected project type: {project_type}") # 可选调试
 
         # 优先从 config.yaml 加载
         core_patterns = load_core_patterns_from_config()
         if not core_patterns:
-            # print(f"[DEBUG] No core_patterns in config, using defaults for {project_type}") # 可选调试
-            core_patterns = CORE_PATTERNS.get(project_type, ["**/*.py"])
+            # print(f"[DEBUG] No core_patterns in config, using defaults for {project_type} and phase {phase}") # 可选调试
+
+            # 如果 config 中没有定义，则根据 phase 和 project_type 动态选择
+            if phase and phase in PHASE_SPECIFIC_PATTERNS:
+                # 1. 首选：使用与当前 phase 相关的预定义模式
+                core_patterns = PHASE_SPECIFIC_PATTERNS[phase]
+                # print(f"[DEBUG] Using phase-specific patterns for '{phase}'") # 可选调试
+            else:
+                # 2. 回退：使用基于项目类型的通用模式
+                core_patterns = CORE_PATTERNS.get(project_type, ["**/*.py"])
+                # print(f"[DEBUG] Using project-type patterns for '{project_type}' or default") # 可选调试
 
         core_files = {}
         root_path = Path(".")
@@ -148,7 +173,7 @@ def generate_context_snapshot() -> Dict[str, Any]:
         result.update(ctx)  # 用户配置优先
         result["context_snapshot"] = snapshot
         result["project_type"] = project_type
-        result["core_patterns"] = core_patterns
+        result["core_patterns"] = core_patterns # 可能有用，或用于调试
         result["core_files"] = core_files
 
         return result
@@ -389,9 +414,3 @@ def debug_print_context() -> None:
             print("  (空)")
     except Exception as e:
         print(f"❌ 无法加载上下文: {e}")
-
-# --- 为了兼容旧代码/CLI 直接调用，保留模块级函数 ---
-# --- 在 CLI 完全重构为通过 AIInteractionManager 调用后可考虑移除 ---
-# generate_context_snapshot 已在上面定义
-# parse_context_file 已在上面定义
-# debug_print_context 已在上面定义

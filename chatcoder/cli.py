@@ -21,7 +21,6 @@ from chatcoder.utils.console import (
     heading, show_welcome, confirm
 )
 from chatcoder.core.init import (init_project, validate_config)
-# 直接调用 context 模块的函数，因为它相对独立
 from chatcoder.core.context import generate_context_snapshot, debug_print_context
 # 导入枚举
 from chatcoder.core.models import TaskStatus
@@ -31,8 +30,9 @@ from chatcoder.core.models import TaskStatus
 # ------------------------------
 
 # 创建核心服务实例 (全局)
+# 为 WorkflowEngine 传入 TaskOrchestrator 实例
 task_orchestrator = TaskOrchestrator()
-workflow_engine = WorkflowEngine()
+workflow_engine = WorkflowEngine(task_orchestrator=task_orchestrator)
 ai_manager = AIInteractionManager()
 
 @click.group(invoke_without_command=True)
@@ -140,8 +140,7 @@ def prompt_cmd(template, description, after, output, feature, phase):
 
         # ✅ 新增：检查任务状态是否可继承
         status = previous_task.get("status", TaskStatus.PENDING.value)
-        # if status != "confirmed": # 旧版
-        if status != TaskStatus.CONFIRMED.value: # 新版
+        if status != TaskStatus.CONFIRMED.value:
             error(f"❌ 前序任务 {after} 状态为 '{status}'，必须是 'confirmed'")
             warning("提示：请先人工审核任务内容，或使用 state-confirm <task_id> 标记为确认")
             return
@@ -157,7 +156,9 @@ def prompt_cmd(template, description, after, output, feature, phase):
         rendered = ai_manager.render_prompt(
             template=template,
             description=description or " ",
-            previous_task=previous_task
+            previous_task=previous_task,
+            # 显式传递 phase，如果没有则回退到 template 名 (与保存时的逻辑一致)
+            phase=phase or template
         )
 
         # 5. 保存任务状态 (使用服务层)
@@ -228,14 +229,11 @@ def edit_template(template: str):
     示例: chatcoder prompt edit analyze
     """
     # 使用服务层中的 resolve_template_path 方法
-    # 解析模板路径
-    # rel_path = resolve_template_path(template) # 旧版直接调用
-    rel_path = ai_manager._resolve_template_path(template) # 新版通过服务实例调用私有方法
+    rel_path = ai_manager._resolve_template_path(template)
     template_file = Path(__file__).parent.parent / "ai-prompts" / rel_path
 
     if not template_file.exists():
         error(f"模板文件不存在: {template_file}")
-        # 提示用户是否创建
         if click.confirm("是否创建该文件？"):
             template_file.parent.mkdir(parents=True, exist_ok=True)
             template_file.write_text(
@@ -251,16 +249,15 @@ def edit_template(template: str):
     success(f"📄 正在打开: {template_file}")
     success(f"📍 路径: {rel_path}")
 
-    # 尝试用系统默认编辑器打开
     try:
         import os
-        import sys;
+        import sys
         from subprocess import run
         if sys.platform == "win32":
             os.startfile(template_file)
         elif sys.platform == "darwin":
             run(["open", str(template_file)], check=True)
-        else:  # Linux
+        else:
             run(["xdg-open", str(template_file)], check=True)
     except Exception as e:
         warning(f"⚠️ 打开失败: {e}")
@@ -291,7 +288,9 @@ def preview_template(template: str, description: str, after: str):
         rendered = ai_manager.render_prompt(
             template=template,
             description=description or "这是一条预览任务描述",
-            previous_task=previous_task
+            previous_task=previous_task,
+            # 预览时也尝试传递 phase，逻辑同上
+            phase=template # 预览时通常没有显式的 phase 参数，可以使用 template 名
         )
 
         console.print("[bold green]✨ 渲染结果:[/bold green]")
@@ -305,10 +304,6 @@ def preview_template(template: str, description: str, after: str):
 # ----------------------------
 # feature 命令组 (部分依赖旧函数，可后续重构)
 # ----------------------------
-# 注意：这部分命令目前仍直接调用 core.state 中的函数，
-# 因为它们需要访问所有任务列表和文件系统操作，
-# 而 TaskOrchestrator 当前没有完全封装这些操作。
-# 这是重构过程中的一个权衡点，可以在后续阶段进一步优化。
 
 @cli.group()
 def feature():
@@ -318,18 +313,16 @@ def feature():
 @feature.command(name="list")
 def feature_list():
     """List all features (grouped by feature_id)"""
-    # TODO: 这部分可以重构为使用 task_orchestrator 的 list_task_states
-    from chatcoder.core.state import get_tasks_dir, load_task_state # 暂时保留
+    from chatcoder.core.state import get_tasks_dir, load_task_state
     tasks_dir = get_tasks_dir()
     if not tasks_dir.exists():
         console.print("No tasks found.", style="yellow")
         return
 
-    # 收集所有 feature_id
     feature_tasks = {}
     for json_file in tasks_dir.glob("*.json"):
         try:
-            data = load_task_state(json_file.stem)  # task_id = filename without .json
+            data = load_task_state(json_file.stem)
             fid = data["feature_id"]
             if fid not in feature_tasks:
                 feature_tasks[fid] = []
@@ -341,7 +334,6 @@ def feature_list():
         console.print("No features found.", style="yellow")
         return
 
-    # 显示表格
     table = Table(title="Features")
     table.add_column("Feature ID", style="cyan")
     table.add_column("Description", style="white")
@@ -352,8 +344,7 @@ def feature_list():
         desc = next((t["description"] for t in tasks if t["description"]), "N/A")
         task_count = len(tasks)
         statuses = {t["status"] for t in tasks}
-        # status = "completed" if all(s == "completed" for s in statuses) else "pending" # 旧版
-        status = TaskStatus.COMPLETED.value if all(s == TaskStatus.COMPLETED.value for s in statuses) else "pending" # 新版 (简化)
+        status = "completed" if all(s == "completed" for s in statuses) else "pending"
         table.add_row(fid, desc, str(task_count), status)
 
     console.print(table)
@@ -362,8 +353,7 @@ def feature_list():
 @click.argument("feature_id")
 def feature_show(feature_id: str):
     """Show all tasks under a specific feature, ordered by phase"""
-    # TODO: 这部分可以重构为使用 task_orchestrator 的 list_task_states
-    from chatcoder.core.state import get_tasks_dir, load_task_state # 暂时保留
+    from chatcoder.core.state import get_tasks_dir, load_task_state
     tasks_dir = get_tasks_dir()
     if not tasks_dir.exists():
         console.print("No tasks found.", style="yellow")
@@ -382,7 +372,6 @@ def feature_show(feature_id: str):
         console.print(f"No tasks found for feature: {feature_id}", style="red")
         return
 
-    # 按 phase 排序
     sorted_tasks = sorted(matching_tasks, key=lambda x: x["phase_order"])
 
     table = Table(title=f"Feature: {feature_id}")
@@ -404,8 +393,7 @@ def feature_show(feature_id: str):
 @feature.command(name="status")
 def feature_status():
     """Show detailed status of all features"""
-    # TODO: 这部分可以重构为使用 task_orchestrator 的 list_task_states
-    from chatcoder.core.state import get_tasks_dir, load_task_state # 暂时保留
+    from chatcoder.core.state import get_tasks_dir, load_task_state
     tasks_dir = get_tasks_dir()
     if not tasks_dir.exists():
         console.print("No tasks found.", style="yellow")
@@ -419,8 +407,7 @@ def feature_status():
             if fid not in feature_stats:
                 feature_stats[fid] = {"tasks": 0, "completed": 0, "phases": set(), "desc": data["description"]}
             feature_stats[fid]["tasks"] += 1
-            # if data["status"] == "completed": # 旧版
-            if data["status"] == TaskStatus.COMPLETED.value: # 新版
+            if data["status"] == "completed":
                 feature_stats[fid]["completed"] += 1
             feature_stats[fid]["phases"].add(data["phase"])
         except Exception as e:
@@ -459,8 +446,7 @@ def feature_status():
 @click.confirmation_option(prompt="Are you sure you want to delete this feature and all its tasks? ")
 def feature_delete(feature_id: str):
     """Delete a feature and all its associated tasks"""
-    # TODO: 这部分可以重构为使用 task_orchestrator 的方法
-    from chatcoder.core.state import get_tasks_dir, load_task_state # 暂时保留
+    from chatcoder.core.state import get_tasks_dir, load_task_state
     tasks_dir = get_tasks_dir()
     if not tasks_dir.exists():
         console.print("No tasks found.", style="yellow")
@@ -471,7 +457,7 @@ def feature_delete(feature_id: str):
         try:
             data = load_task_state(json_file.stem)
             if data["feature_id"] == feature_id:
-                json_file.unlink()  # 删除文件
+                json_file.unlink()
                 deleted += 1
         except Exception as e:
             console.print(f"Warning: failed to delete {json_file}: {e}", style="red")
@@ -483,72 +469,82 @@ def feature_delete(feature_id: str):
 
 @cli.command(name="task-next")
 def task_next():
-    """Recommend the next task based on workflow schema"""
-    # TODO: 这部分可以重构为使用 task_orchestrator 和 workflow_engine
-    # 目前它直接调用了 state.list_task_states 和 workflow.get_feature_status
-    # 可以改为调用 task_orchestrator.list_task_states() 和 workflow_engine.get_feature_status()
-    from chatcoder.core.state import get_tasks_dir, list_task_states # 暂时保留 list_task_states
-    # from chatcoder.core.workflow import get_feature_status, load_workflow_schema, get_phase_order # 暂时保留
-    tasks_dir = get_tasks_dir()
+    """Recommend the next task based on workflow schema and AI analysis."""
+    
+    tasks_dir = task_orchestrator.get_tasks_dir()
     if not tasks_dir.exists() or not any(tasks_dir.glob("*.json")):
         console.print("No tasks found. Run 'chatcoder start -d \"...\"' first.", style="yellow")
         return
 
-    # all_tasks = list_task_states() # 旧版直接调用
-    all_tasks = task_orchestrator.list_task_states() # 新版通过服务调用
+    # 使用服务层获取所有任务摘要
+    all_tasks = task_orchestrator.list_task_states()
+
     from collections import defaultdict
     features = defaultdict(list)
     for task in all_tasks:
         features[task["feature_id"]].append(task)
 
+    if not features:
+         console.print("No features found.", style="yellow")
+         return
+
+    # 为每个特性生成智能推荐
     recommendations = []
     for feature_id, tasks in features.items():
-        # status = get_feature_status(feature_id) # 旧版直接调用
-        status = workflow_engine.get_feature_status(feature_id) # 新版通过服务调用
+        # 调用新的智能推荐方法
+        recommendation_info = workflow_engine.recommend_next_phase(feature_id)
 
-        if not status["next_phase"]:
-            continue  # 已完成
+        # 如果特性已完成，则跳过
+        if not recommendation_info:
+            continue
 
-        latest_completed = status["current_phase"]
-        next_phase = status["next_phase"]
-        workflow = status["workflow"]
+        # 构造用于显示的推荐信息
+        feature_desc = next((t["description"] for t in tasks if t["description"]), "N/A")
 
         recommendations.append({
             "feature_id": feature_id,
-            "description": tasks[0]["description"],
-            "current_phase": latest_completed,
-            "next_phase": next_phase,
-            "workflow": workflow,
-            "reason": f"Phase '{latest_completed}' is completed." if latest_completed else "Feature not started."
+            "description": feature_desc,
+            "recommended_phase": recommendation_info["phase"],
+            "reason": recommendation_info["reason"],
+            "source": recommendation_info["source"], # 'standard' or 'smart'
+            "current_phase": recommendation_info.get("current_phase")
         })
 
-    # 排序：优先推荐早期 phase
-    # schema = load_workflow_schema() # 旧版直接调用
-    schema = workflow_engine.load_workflow_schema() # 新版通过服务调用
-    # phase_order = get_phase_order(schema) # 旧版直接调用
-    phase_order = workflow_engine.get_phase_order(schema) # 新版通过服务调用
-    recommendations.sort(key=lambda x: phase_order.get(x["next_phase"], 99))
-
+    # 如果没有推荐，默认显示标准推荐或提示完成
     if not recommendations:
         console.print("✅ All features are complete or in progress.", style="green")
         return
 
+    # 显示第一个（最相关或优先级最高的）推荐
     rec = recommendations[0]
-    next_phase_info = next(
-        (p for p in schema["phases"] if p["name"] == rec["next_phase"]),
-        {"title": rec["next_phase"].title()}
-    )
+    
+    # 获取工作流 schema 以获取阶段标题等信息
+    dummy_status = workflow_engine.get_feature_status(rec["feature_id"])
+    workflow_name = dummy_status.get("workflow", "default")
+    try:
+        schema = workflow_engine.load_workflow_schema(workflow_name)
+    except ValueError:
+        schema = {"phases": []}
+
+    # 找到推荐阶段和当前阶段的信息
+    recommended_phase_info = next((p for p in schema.get("phases", []) if p["name"] == rec["recommended_phase"]), {"title": rec["recommended_phase"].title()})
+    current_phase_info = next((p for p in schema.get("phases", []) if p["name"] == rec["current_phase"]), {"title": (rec["current_phase"] or "None").title()}) if rec["current_phase"] else {"title": "None"}
 
     console.print("🚀 Recommended Next Task", style="bold green")
     console.print(f"Feature: [magenta]{rec['feature_id']}[/magenta]")
     console.print(f"Description: {rec['description']}")
-    console.print(f"workflow: {rec['workflow']}")
-    console.print(f"Current: [blue]{rec['current_phase'] or 'None'}[/blue] → Next: [yellow]{next_phase_info['title']} ({rec['next_phase']})[/yellow]")
-    console.print(f"Reason: {rec['reason']}")
+    console.print(f"Workflow: {workflow_name}")
+    console.print(f"Current: [blue]{current_phase_info['title']} ({rec['current_phase'] or 'None'})[/blue] → "
+                  f"Next: [yellow]{recommended_phase_info['title']} ({rec['recommended_phase']})[/yellow]")
+    
+    # 根据推荐来源改变提示信息
+    reason_style = "green" if rec['source'] == 'standard' else "bold yellow"
+    console.print(f"Reason: [{reason_style}]{rec['reason']}[/{reason_style}]")
 
-    suggestion = f"chatcoder task create --feature {rec['feature_id']} --phase {rec['next_phase']} --template {rec['next_phase']}"
+    suggestion = f"chatcoder task create --feature {rec['feature_id']} --phase {rec['recommended_phase']}"
     console.print(f"\n💡 Suggested command:")
     console.print(f"[dim]$[/dim] [cyan]{suggestion}[/cyan]")
+# --- 修改点结束 ---
 
 @cli.command(name="task-create")
 @click.option("--feature-id", "-f", required=True, help="Feature ID")
@@ -557,21 +553,14 @@ def task_next():
 @click.option("--description", "-d", help="Override description")
 def task_create(feature_id: str, phase: str, template: str, description: str = None):
     """Create a new task for a feature"""
-    # TODO: 这部分可以重构为使用 task_orchestrator 和 workflow_engine
-    # from chatcoder.core.workflow import load_workflow_schema # 暂时保留
-    # from chatcoder.core.state import list_task_states # 暂时保留
-
-    # 从任意任务中推断 workflow
-    # tasks = list_task_states() # 旧版直接调用
-    tasks = task_orchestrator.list_task_states() # 新版通过服务调用
+    tasks = task_orchestrator.list_task_states()
     workflow_tasks = [t for t in tasks if t.get("feature_id") == feature_id]
     workflow_name = "default"
     if workflow_tasks:
         workflow_name = workflow_tasks[0].get("workflow", "default")
 
     try:
-        # schema = load_workflow_schema(workflow_name) # 旧版直接调用
-        schema = workflow_engine.load_workflow_schema(workflow_name) # 新版通过服务调用
+        schema = workflow_engine.load_workflow_schema(workflow_name)
         valid_phases = [p["name"] for p in schema["phases"]]
         if phase not in valid_phases:
             console.print(f"❌ Phase '{phase}' not in workflow '{workflow_name}'", style="red")
@@ -580,22 +569,20 @@ def task_create(feature_id: str, phase: str, template: str, description: str = N
         console.print(f"❌ {e}", style="red")
         return
 
-    # task_id = generate_task_id() # 旧版直接调用
-    task_id = task_orchestrator.generate_task_id() # 新版通过服务调用
+    task_id = task_orchestrator.generate_task_id()
     desc = description or f"Continue work on {feature_id}"
 
     if not template:
         template = phase
 
-    # save_task_state( # 旧版直接调用
-    task_orchestrator.save_task_state( # 新版通过服务调用
+    task_orchestrator.save_task_state(
         task_id=task_id,
         template=template,
         description=desc,
         context={"source": "cli_task_create", "workflow": workflow_name},
         feature_id=feature_id,
         phase=phase,
-        status=TaskStatus.PENDING.value, # 使用枚举
+        status=TaskStatus.PENDING.value,
         workflow=workflow_name
     )
 
@@ -606,7 +593,6 @@ def task_create(feature_id: str, phase: str, template: str, description: str = N
 @click.argument("task_id")
 def state_confirm(task_id):
     """标记任务为已确认"""
-    # 使用服务层获取任务文件路径
     task_file = task_orchestrator.get_task_file_path(task_id)
     if not task_file.exists():
         error(f"任务不存在: {task_id}")
@@ -616,19 +602,14 @@ def state_confirm(task_id):
         with open(task_file, "r", encoding="utf-8") as f:
             data = json.load(f)
 
-        # 获取当前状态
         current_status = data.get("status", TaskStatus.PENDING.value)
 
-        # 如果已经是 confirmed，提示用户
-        # if current_status == "confirmed": # 旧版
-        if current_status == TaskStatus.CONFIRMED.value: # 新版
+        if current_status == TaskStatus.CONFIRMED.value:
             warning(f"⚠️  任务 {task_id} 已是 'confirmed' 状态，无需重复确认。")
             console.print_json(data=data)
             return
 
-        # 更新状态
-        # data["status"] = "confirmed" # 旧版
-        data["status"] = TaskStatus.CONFIRMED.value # 新版
+        data["status"] = TaskStatus.CONFIRMED.value
         data["confirmed_at"] = datetime.now().isoformat()
         data["confirmed_at_str"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -645,7 +626,6 @@ def state_confirm(task_id):
 def state_ls():
     """📋 列出所有持久化任务状态"""
     heading("任务状态列表")
-    # 使用服务层
     tasks = task_orchestrator.list_task_states()
     if not tasks:
         warning("无任务记录")
@@ -662,16 +642,11 @@ def state_ls():
     console.print(table)
 
 
-# ------------------------------
-# 命令 5: state-show - 查看任务详情
-# ------------------------------
-
 @cli.command(name="state-show")
 @click.argument('task_id')
 def state_show(task_id):
     """🔍 查看指定任务的完整状态"""
     heading(f"任务详情: {task_id}")
-    # 使用服务层
     data = task_orchestrator.load_task_state(task_id)
     if not data:
         error(f"任务不存在: {task_id}")
@@ -685,44 +660,38 @@ def state_show(task_id):
 def start(description: str, workflow: str):
     """Start a new feature by creating the first task (e.g., analyze)"""
     try:
-        # schema = load_workflow_schema(workflow) # 旧版直接调用
-        schema = workflow_engine.load_workflow_schema(workflow) # 新版通过服务调用
+        schema = workflow_engine.load_workflow_schema(workflow)
     except ValueError as e:
         console.print(f"❌ {e}", style="red")
         return
 
-    # 获取第一个 phase
     first_phase = schema["phases"][0]
-    phase_name = first_phase["name"]      # 如 "analyze"
-    template_name = first_phase["template"]  # 如 "analyze"
+    phase_name = first_phase["name"]
+    template_name = first_phase["template"]
 
-    # task_id = generate_task_id() # 旧版直接调用
-    task_id = task_orchestrator.generate_task_id() # 新版通过服务调用
-    # feature_id = generate_feature_id(description) # 旧版直接调用
-    feature_id = task_orchestrator.generate_feature_id(description) # 新版通过服务调用
+    task_id = task_orchestrator.generate_task_id()
+    feature_id = task_orchestrator.generate_feature_id(description)
 
     context = {
         "source": "cli_start",
         "workflow": workflow
     }
 
-    # save_task_state( # 旧版直接调用
-    task_orchestrator.save_task_state( # 新版通过服务调用
+    task_orchestrator.save_task_state(
         task_id=task_id,
         template=template_name,
         description=description,
         context=context,
         feature_id=feature_id,
         phase=phase_name,
-        status=TaskStatus.PENDING.value, # 使用枚举
+        status=TaskStatus.PENDING.value,
         workflow=workflow
     )
 
     console.print(f"🚀 Started new feature: {feature_id}", style="green")
     console.print(f"📝 Description: {description}", style="white")
     console.print(f"🔧 First task: {task_id} ({template_name})", style="blue")
-    # console.print(f"📄 Saved to: {get_tasks_dir() / f'{task_id}.json'}", style="dim") # 旧版直接调用
-    console.print(f"📄 Saved to: {task_orchestrator.get_task_file_path(task_id)}", style="dim") # 新版通过服务调用
+    console.print(f"📄 Saved to: {task_orchestrator.get_task_file_path(task_id)}", style="dim")
 
 @cli.group()
 def workflow():
@@ -733,11 +702,7 @@ def workflow():
 def workflow_list():
     """List all available workflow templates"""
     from pathlib import Path
-    # workflows_dir = get_workflow_path() # 旧版直接调用
-    # workflows_dir = workflow_engine.get_workflow_path() # 新版通过服务调用 (实例方法)
-    workflows_dir = WorkflowEngine.get_workflow_path() # 新版通过服务调用 (类方法，如果保留的话)
-    # 或者直接调用实例方法
-    # workflows_dir = workflow_engine.get_workflow_path() 
+    workflows_dir = workflow_engine.get_workflow_path()
     
     if not workflows_dir.exists():
         console.print("❌ No workflows directory found", style="red")
@@ -750,10 +715,9 @@ def workflow_list():
 
     found = False
     for file in workflows_dir.glob("*.yaml"):
-        name = file.stem  # 移除 .yaml
+        name = file.stem
         try:
-            # schema = load_workflow_schema(name) # 旧版直接调用
-            schema = workflow_engine.load_workflow_schema(name) # 新版通过服务调用
+            schema = workflow_engine.load_workflow_schema(name)
             phase_names = " → ".join([p["name"] for p in schema["phases"]])
             table.add_row(name, phase_names, schema.get("description", "-"))
             found = True
@@ -764,9 +728,6 @@ def workflow_list():
         console.print(table)
     else:
         console.print("📭 No valid workflow templates found", style="yellow")
-# ------------------------------
-# 命令 7: status（占位）
-# ------------------------------
 
 @cli.command()
 def status():
@@ -782,7 +743,6 @@ def config_validate():
 @cli.command()
 def debug_context():
     """调试：打印当前上下文"""
-    # 直接调用 context 模块的函数
     debug_print_context()
 
 # ------------------------------
