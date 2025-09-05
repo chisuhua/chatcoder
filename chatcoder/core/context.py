@@ -5,7 +5,7 @@
 from pathlib import Path
 import hashlib
 import yaml
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from .detector import detect_project_type
 from .utils import read_file_safely
 
@@ -49,7 +49,8 @@ def parse_context_file() -> Dict[str, Any]:
     except Exception as e:
         raise RuntimeError(f"解析上下文文件失败: {e}")
 
-def load_core_patterns_from_config() -> Optional[list]:
+
+def load_core_patterns_from_config() -> Optional[List[str]]:
     """
     从 config.yaml 中加载 core_patterns 配置
     """
@@ -61,10 +62,17 @@ def load_core_patterns_from_config() -> Optional[list]:
             config = yaml.safe_load(f)
             if not config:
                 return None
-            return config.get("core_patterns")
+            # 确保返回的是列表
+            patterns = config.get("core_patterns")
+            if isinstance(patterns, list):
+                return patterns
+            elif patterns is not None:
+                 print(f"⚠️  {CONFIG_FILE} 中的 core_patterns 不是列表，已忽略。")
+            return None
     except Exception as e:
-        print(f"⚠️ 读取 {CONFIG_FILE} 失败: {e}")
+        print(f"⚠️ 读取 {CONFIG_FILE} 失败: {e} ")
         return None
+
 
 def generate_context_snapshot() -> Dict[str, Any]:
     """
@@ -76,50 +84,64 @@ def generate_context_snapshot() -> Dict[str, Any]:
         # === 1. 构建 Markdown 格式的上下文摘要（原有逻辑）===
         snapshot = "## 🧩 项目上下文\n"
         if ctx:
-            snapshot += "\n".join(f"- {k}: {v}" for k, v in ctx.items() if v)
+            # 过滤掉空值
+            non_empty_ctx = {k: v for k, v in ctx.items() if v}
+            if non_empty_ctx:
+                snapshot += "\n".join(f"- {k}: {v}" for k, v in non_empty_ctx.items())
+            else:
+                snapshot += "- 无上下文信息"
         else:
             snapshot += "- 无上下文信息"
 
         # === 2. 智能识别项目类型并扫描核心文件 ===
         project_type = detect_project_type()
+        # print(f"[DEBUG] Detected project type: {project_type}") # 可选调试
 
         # 优先从 config.yaml 加载
         core_patterns = load_core_patterns_from_config()
         if not core_patterns:
+            # print(f"[DEBUG] No core_patterns in config, using defaults for {project_type}") # 可选调试
             core_patterns = CORE_PATTERNS.get(project_type, ["**/*.py"])
 
         core_files = {}
+        root_path = Path(".")
         for pattern in core_patterns:
-            for file_path in Path(".").glob(pattern):
-                if not file_path.is_file():
-                    continue
-                content = read_file_safely(file_path)
-                if not content:
-                    continue
-                # 计算哈希
-                file_hash = hashlib.md5(content.encode()).hexdigest()[:8]
-                # 提取关键片段
-                snippet = _extract_code_snippet(content, file_path.suffix)
-                core_files[str(file_path)] = {
-                    "hash": file_hash,
-                    "snippet": snippet
-                }
+            try:
+                # print(f"[DEBUG] Searching for pattern: {pattern}") # 可选调试
+                for file_path in root_path.glob(pattern):
+                    # print(f"[DEBUG] Found file: {file_path}") # 可选调试
+                    if not file_path.is_file():
+                        continue
+                    content = read_file_safely(file_path)
+                    if not content:
+                        continue
+                    # 计算哈希
+                    file_hash = hashlib.md5(content.encode()).hexdigest()[:8]
+                    # 提取关键片段
+                    snippet = _extract_code_snippet(content, file_path.suffix)
+                    core_files[str(file_path)] = {
+                        "hash": file_hash,
+                        "snippet": snippet
+                    }
+            except Exception as e:
+                # 捕获单个 pattern 的错误，避免中断整个过程
+                print(f"⚠️  处理模式 '{pattern}' 时出错: {e}")
 
         # 添加到快照展示
         if core_files:
             snapshot += f"\n\n## 🔍 核心文件 ({len(core_files)} 个)\n"
+            # 按文件路径排序以保证一致性
             for fp in sorted(core_files.keys()):
                 info = core_files[fp]
-                snapshot += f"- `{fp}`\n"
-                if info.get("snippet") == "<empty>":
+                snapshot += f"- `{fp}` (hash:{info['hash']})\n"
+                if info.get("snippet") == " <empty> ":
                     snapshot += "  → (空文件)\n"
                 else:
-                    lines = info["snippet"].splitlines()[:4]
+                    lines = info["snippet"].splitlines()[:4] # 限制显示行数
                     for line in lines:
                         snapshot += f"  {line}\n"
                     if len(info["snippet"].splitlines()) > 4:
                         snapshot += "  ...\n"
-
 
         # === 3. 构建最终结果：保留原有字段 + 新增核心文件信息 ===
         result = DEFAULT_CONTEXT.copy()
@@ -133,6 +155,7 @@ def generate_context_snapshot() -> Dict[str, Any]:
 
     except Exception as e:
         # 安全降级：返回默认上下文
+        print(f"⚠️ 生成上下文快照时出错: {e}") # 可选：记录到日志
         fallback = DEFAULT_CONTEXT.copy()
         fallback["context_snapshot"] = f"## 🧩 项目上下文\n- 加载失败: {str(e)}"
         fallback["project_type"] = "unknown"
@@ -140,32 +163,14 @@ def generate_context_snapshot() -> Dict[str, Any]:
         fallback["core_patterns"] = []
         return fallback
 
-#def _extract_code_snippet(content: str, suffix: str) -> str:
-#   """
-#   从文件内容中提取关键代码片段（前10行关键代码）
-#   """
-#   lines = content.splitlines()[:30]
-#   key_lines = []
-
-#   for line in lines:
-#       line = line.strip()
-#       if not line or line.startswith("#") or line.startswith("//"):
-#           continue
-
-#       if suffix == ".py":
-#           if any(line.startswith(kw) for kw in ("def ", "class ", "import ", "from ")):
-#               key_lines.append(line)
-#       elif suffix in [".h", ".hpp", ".cpp", ".cc"]:
-#           if any(kw in line for kw in ["class ", "struct ", "void ", "int ", "#include"]):
-#               key_lines.append(line)
-
-#   return "\n".join(key_lines[:10])
 
 def _extract_code_snippet(content: str, suffix: str) -> str:
     """
     智能提取代码片段，按语言做语义化处理
     """
     content = content.strip()
+    if not content:
+        return " <empty> "
     lines = content.splitlines()
 
     # 根据后缀推断语言
@@ -177,12 +182,12 @@ def _extract_code_snippet(content: str, suffix: str) -> str:
     # === 1. Python: 提取类、函数、import 和 main 入口 ===
     if lang == "python":
         # 保留 import
-        imports = [line for line in lines if line.startswith(("import", "from "))]
+        imports = [line for line in lines if line.startswith(("import ", "from "))]
 
         # 找到前几个函数/类定义
         defs = []
         for i, line in enumerate(lines):
-            if line.startswith(("def ", "class ")) and not line.endswith(": pass"):
+            if line.startswith(("def ", "class ")) and not line.rstrip().endswith(": pass"):
                 block = _get_code_block(lines, i)
                 defs.append(block)
                 if len(defs) >= 2:
@@ -191,56 +196,72 @@ def _extract_code_snippet(content: str, suffix: str) -> str:
         # main 入口
         main_block = None
         for i, line in enumerate(lines):
-            if line.strip().startswith("if __name__") and "__main__" in line:
+            if line.strip().startswith("if __name__ ") and "__main__" in line:
                 main_block = _get_code_block(lines, i)
                 break
 
         parts = []
         if imports:
-            parts.append("...")  # 省略部分导入
+            # parts.append("...")  # 省略部分导入，保留最后几个
             parts.extend(imports[-3:])  # 最后 3 个重要导入
         if defs:
-            parts.append("# Key Functions/Classes:")
+            parts.append("# Key Functions/Classes: ")
             parts.extend(defs)
         if main_block:
-            parts.append("# Entry Point:")
+            parts.append("# Entry Point: ")
             parts.append(main_block)
+        if not parts:
+             # 如果没找到特定结构，返回前几行
+             parts = lines[:5]
 
-        return "\n".join(parts[:MAX_LINES]) + "\n..."
+        snippet = "\n".join(parts[:MAX_LINES])
+        return snippet + ("\n# ... (truncated)" if len(parts) > MAX_LINES else "")
 
-    # === 2. JavaScript/TypeScript ===
-    elif lang in ("javascript", "typescript"):
-        # 提取 export function / class / const App =
-        exports = [line for line in lines if "export" in line and ("function" in line or "class" in line)]
-        react_components = [line for line in lines if "const " in line and "= (" in line and "=>" in line]
+    # === 2. C++: 提取 include, class, struct, function ===
+    elif lang in ("cpp", "c"):
+        includes = [line for line in lines if line.strip().startswith("#include")]
+        classes_structs = []
+        functions = []
+        namespaces = []
+
+        for i, line in enumerate(lines):
+            stripped_line = line.strip()
+            if stripped_line.startswith("class ") or stripped_line.startswith("struct "):
+                # 简单提取类/结构体声明行
+                classes_structs.append(stripped_line.split("{")[0].rstrip() + " {...};")
+                if len(classes_structs) >= 2:
+                     # 避免过多
+                     classes_structs[-1] += " ..."
+                     break
+            elif stripped_line.startswith(("void ", "int ", "bool ", "std::", "template ")) and "(" in stripped_line and ");" in stripped_line:
+                 # 简单匹配函数声明
+                 functions.append(stripped_line)
+                 if len(functions) >= 3:
+                     functions[-1] += " ..."
+                     break
+            elif stripped_line.startswith("namespace "):
+                namespaces.append(stripped_line.split("{")[0].rstrip() + " {...}")
 
         parts = []
-        if exports:
-            parts.append("// Exported Functions/Classes:")
-            parts.extend(exports[:2])
-        if react_components:
-            parts.append("// React Components:")
-            parts.extend(react_components[:1])
+        if includes:
+            parts.extend(includes[:3]) # 前几个 include
+        if namespaces:
+             parts.append("// Namespaces: ")
+             parts.extend(namespaces[:1])
+        if classes_structs:
+            parts.append("// Classes/Structs: ")
+            parts.extend(classes_structs)
+        if functions:
+            parts.append("// Functions: ")
+            parts.extend(functions)
         if not parts:
-            parts = lines[:5]
+             # 默认返回前几行
+             parts = lines[:5]
 
-        return "\n".join(parts[:MAX_LINES]) + "\n..."
+        snippet = "\n".join(parts[:MAX_LINES])
+        return snippet + ("\n// ... (truncated)" if len(parts) > MAX_LINES else "")
 
-    # === 3. Go ===
-    elif lang == "go":
-        package_line = lines[0] if lines and lines[0].startswith("package ") else "package main"
-        imports = [line for line in lines if "import" in line]
-        funcs = [i for i, line in enumerate(lines) if line.startswith("func ")]
-
-        parts = [package_line]
-        if imports:
-            parts.extend(imports[:3])
-        for i in funcs[:2]:
-            parts.extend(_get_code_block(lines, i))
-
-        return "\n".join(parts[:MAX_LINES]) + "\n..."
-
-    # === 4. 默认：取前几行 + 后几行 ===
+    # === 3. 默认：取前几行 + 后几行 ===
     else:
         if len(lines) <= MAX_LINES:
             return content
@@ -254,45 +275,66 @@ def _get_code_block(lines: list, start_idx: int) -> str:
     """
     提取一个函数或类定义的完整块（含嵌套）
     """
-    block = [lines[start_idx]]
-    indent = _get_indent(lines[start_idx])
+    if start_idx >= len(lines):
+        return ""
+
+    block = [lines[start_idx].rstrip()] # 移除行尾换行符
+    # 更稳健地处理缩进
+    first_line_indent = len(lines[start_idx]) - len(lines[start_idx].lstrip())
     i = start_idx + 1
 
     while i < len(lines):
-        if not lines[i].strip():
-            block.append("")  # 保留空行
+        line = lines[i]
+        stripped_line = line.lstrip()
+        if not stripped_line:
+            block.append("") # 保留空行
             i += 1
             continue
-        current_indent = _get_indent(lines[i])
-        if current_indent < indent and lines[i].strip() not in ["#", ""]:
-            break
-        block.append(lines[i])
+
+        # 计算当前行的实际缩进（空格数）
+        current_indent = len(line) - len(stripped_line)
+
+        # 如果当前行缩进小于起始行缩进，并且不是空行或注释，则可能是块结束
+        # （需要考虑非缩进语言如 C++ 的情况，这里主要适用于 Python）
+        # 对于 Python，这是一个合理的判断
+        if current_indent < first_line_indent and stripped_line not in ('#', '"""', "'''") and not stripped_line.startswith('#'):
+             # 检查是否是同级或更高级别的定义开始
+             if stripped_line.startswith(('def ', 'class ', 'if __name__')):
+                 break # 停在下一个同级定义前
+
+        block.append(line.rstrip()) # 移除行尾换行符
         i += 1
-        if len(block) >= 10:  # 防止太长
-            block.append("    # ...")
+        if len(block) >= 20:  # 防止太长
+            block.append("    # ... (truncated in snippet)")
             break
 
     return "\n".join(block)
 
 
-def _get_indent(line: str) -> int:
-    return len(line) - len(line.lstrip())
+# def _get_indent(line: str) -> int:
+#     return len(line) - len(line.lstrip())
 
 
 def _suffix_to_lang(suffix: str) -> Optional[str]:
     mapping = {
         ".py": "python",
-        ".js": "javascript",
-        ".ts": "typescript",
-        ".go": "go",
-        ".rs": "rust",
+        # ".js": "javascript",
+        # ".ts": "typescript",
+        # ".go": "go",
+        # ".rs": "rust",
         ".cpp": "cpp",
+        ".cc": "cpp",
+        ".cxx": "cpp",
         ".c": "c",
-        ".java": "java",
-        ".rb": "ruby",
-        ".php": "php"
+        ".h": "cpp", # Header for C/C++
+        ".hpp": "cpp",
+        # ".java": "java",
+        # ".rb": "ruby",
+        # ".php": "php"
     }
     return mapping.get(suffix.lower())
+
+
 # ------------------------------
 # 附加功能（可选，用于 init.py）
 # ------------------------------
@@ -311,8 +353,9 @@ def write_context_file(data: Dict[str, Any]) -> None:
     """
     ensure_context_dir()
     try:
+        # 使用 sort_keys=False 保持用户定义的顺序
         with open(CONTEXT_FILE, 'w', encoding='utf-8') as f:
-            yaml.dump(data, f, allow_unicode=True, indent=2, sort_keys=False)
+            yaml.dump(data, f, allow_unicode=True, indent=2, sort_keys=False, default_flow_style=False)
     except Exception as e:
         raise IOError(f"写入上下文文件失败: {e}")
 
@@ -338,8 +381,17 @@ def debug_print_context() -> None:
     """
     try:
         ctx = parse_context_file()
-        print("📄 当前上下文:")
-        for k, v in ctx.items():
-            print(f"  {k}: {v}")
+        print("📄 当前上下文: ")
+        if ctx:
+            for k, v in ctx.items():
+                print(f"  {k}: {v}")
+        else:
+            print("  (空)")
     except Exception as e:
         print(f"❌ 无法加载上下文: {e}")
+
+# --- 为了兼容旧代码/CLI 直接调用，保留模块级函数 ---
+# --- 在 CLI 完全重构为通过 AIInteractionManager 调用后可考虑移除 ---
+# generate_context_snapshot 已在上面定义
+# parse_context_file 已在上面定义
+# debug_print_context 已在上面定义

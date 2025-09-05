@@ -11,7 +11,7 @@ import yaml
 # 常量定义
 # ------------------------------
 
-TEMPLATE_DIR = Path(__file__).parent.parent / "ai-prompts" 
+TEMPLATE_DIR = Path(__file__).parent.parent / "templates" / "ai-prompts" 
 CONTEXT_FILE = Path(".chatcoder") / "context.yaml"
 CONFIG_FILE = Path(".chatcoder") / "config.yaml"  # 新增
 
@@ -85,8 +85,8 @@ def init_project():
         click.echo(f"✅ 已生成: {CONFIG_FILE}")
 
     # 检查是否已存在
-    if context_file.exists():
-        if not click.confirm(f"{context_file} 已存在。是否覆盖？", default=False):
+    if CONTEXT_FILE.exists():
+        if not click.confirm(f"{CONTEXT_FILE} 已存在。是否覆盖？", default=False):
             click.echo("初始化已取消。")
             return
 
@@ -105,8 +105,8 @@ def init_project():
         raise
     
     try:
-        context_file.write_text(context_rendered, encoding="utf-8")
-        click.echo(f"✅ 已生成: {context_file}")
+        CONTEXT_FILE.write_text(context_rendered, encoding="utf-8")
+        click.echo(f"✅ 已生成: {CONTEXT_FILE}")
         click.echo(f"🔧 项目语言: {lang}")
         click.echo("📌 可使用 `chatcoder prompt` 开始第一个任务")
     except Exception as e:
