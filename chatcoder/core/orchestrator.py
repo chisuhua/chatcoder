@@ -188,3 +188,6 @@ class TaskOrchestrator:
         获取任务状态文件的完整路径。
         """
         return _get_task_file_path(task_id)
+
+    def get_tasks_dir(self) -> Path:
+        return _get_tasks_dir()
