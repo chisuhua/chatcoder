@@ -21,6 +21,7 @@ from chatcoder.utils.console import (
     heading, show_welcome, confirm
 )
 from chatcoder.core.init import (init_project, validate_config)
+# 直接调用 context 模块的函数，因为它相对独立
 from chatcoder.core.context import generate_context_snapshot, debug_print_context
 # 导入枚举
 from chatcoder.core.models import TaskStatus
@@ -153,6 +154,7 @@ def prompt_cmd(template, description, after, output, feature, phase):
 
     try:
         # 4. 渲染提示词 (使用服务层)
+        # --- 修改点：传递 phase 给 render_prompt ---
         rendered = ai_manager.render_prompt(
             template=template,
             description=description or " ",
@@ -160,6 +162,7 @@ def prompt_cmd(template, description, after, output, feature, phase):
             # 显式传递 phase，如果没有则回退到 template 名 (与保存时的逻辑一致)
             phase=phase or template
         )
+        # --- 修改点结束 ---
 
         # 5. 保存任务状态 (使用服务层)
         task_orchestrator.save_task_state(
@@ -285,6 +288,7 @@ def preview_template(template: str, description: str, after: str):
 
     try:
         # 渲染 (使用服务层)
+        # --- 修改点：预览时也传递 phase ---
         rendered = ai_manager.render_prompt(
             template=template,
             description=description or "这是一条预览任务描述",
@@ -292,6 +296,7 @@ def preview_template(template: str, description: str, after: str):
             # 预览时也尝试传递 phase，逻辑同上
             phase=template # 预览时通常没有显式的 phase 参数，可以使用 template 名
         )
+        # --- 修改点结束 ---
 
         console.print("[bold green]✨ 渲染结果:[/bold green]")
         console.print("=" * 60)
@@ -304,16 +309,21 @@ def preview_template(template: str, description: str, after: str):
 # ----------------------------
 # feature 命令组 (部分依赖旧函数，可后续重构)
 # ----------------------------
-
+# TODO: Refactor feature commands to use task_orchestrator methods for data access
+#       instead of directly importing functions from chatcoder.core.state.
+#       This will improve cohesion and make future separation of concerns (e.g., into chatflow/chatcontext)
+#       easier.
 @cli.group()
 def feature():
     """Manage features (grouped development workflows)"""
     pass
 
+# TODO: Refactor to use task_orchestrator.list_task_states()
 @feature.command(name="list")
 def feature_list():
     """List all features (grouped by feature_id)"""
-    from chatcoder.core.state import get_tasks_dir, load_task_state
+    # TODO: 这部分可以重构为使用 task_orchestrator 的 list_task_states
+    from chatcoder.core.state import get_tasks_dir, load_task_state # 暂时保留
     tasks_dir = get_tasks_dir()
     if not tasks_dir.exists():
         console.print("No tasks found.", style="yellow")
@@ -349,11 +359,13 @@ def feature_list():
 
     console.print(table)
 
+# TODO: Refactor to use task_orchestrator.list_task_states() and task_orchestrator.load_task_state()
 @feature.command(name="show")
 @click.argument("feature_id")
 def feature_show(feature_id: str):
     """Show all tasks under a specific feature, ordered by phase"""
-    from chatcoder.core.state import get_tasks_dir, load_task_state
+    # TODO: 这部分可以重构为使用 task_orchestrator 的 list_task_states
+    from chatcoder.core.state import get_tasks_dir, load_task_state # 暂时保留
     tasks_dir = get_tasks_dir()
     if not tasks_dir.exists():
         console.print("No tasks found.", style="yellow")
@@ -390,10 +402,12 @@ def feature_show(feature_id: str):
 
     console.print(table)
 
+# TODO: Refactor to use task_orchestrator.list_task_states()
 @feature.command(name="status")
 def feature_status():
     """Show detailed status of all features"""
-    from chatcoder.core.state import get_tasks_dir, load_task_state
+    # TODO: 这部分可以重构为使用 task_orchestrator 的 list_task_states
+    from chatcoder.core.state import get_tasks_dir, load_task_state # 暂时保留
     tasks_dir = get_tasks_dir()
     if not tasks_dir.exists():
         console.print("No tasks found.", style="yellow")
@@ -441,12 +455,14 @@ def feature_status():
 
     console.print(table)
 
+# TODO: Refactor to use task_orchestrator methods for listing and deleting task files
 @feature.command(name="delete")
 @click.argument("feature_id")
 @click.confirmation_option(prompt="Are you sure you want to delete this feature and all its tasks? ")
 def feature_delete(feature_id: str):
     """Delete a feature and all its associated tasks"""
-    from chatcoder.core.state import get_tasks_dir, load_task_state
+    # TODO: 这部分可以重构为使用 task_orchestrator 的方法
+    from chatcoder.core.state import get_tasks_dir, load_task_state # 暂时保留
     tasks_dir = get_tasks_dir()
     if not tasks_dir.exists():
         console.print("No tasks found.", style="yellow")
@@ -467,6 +483,7 @@ def feature_delete(feature_id: str):
     else:
         console.print(f"No tasks found for feature: {feature_id}", style="yellow")
 
+# --- 修改点：重写 task-next 命令 ---
 @cli.command(name="task-next")
 def task_next():
     """Recommend the next task based on workflow schema and AI analysis."""
