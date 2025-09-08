@@ -5,7 +5,7 @@ ChatFlow 核心接口 - 工作流状态存储 (IWorkflowStateStore)
 """
 
 from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional
+from typing import List, Dict, Any, Optional
 
 class IWorkflowStateStore(ABC):
     """
@@ -15,30 +15,20 @@ class IWorkflowStateStore(ABC):
 
     @abstractmethod
     def save_state(self, instance_id: str, state_data: Dict[str, Any]) -> None:
-        """
-        保存工作流实例的状态。
-
-        Args:
-            instance_id (str): 工作流实例的唯一标识符。
-            state_data (Dict[str, Any]): 包含工作流实例所有状态信息的字典。
-
-        Raises:
-            Exception: 如果保存失败，抛出相应异常。
-        """
+        """ 保存工作流实例的状态。 """
         pass
 
     @abstractmethod
     def load_state(self, instance_id: str) -> Optional[Dict[str, Any]]:
+        """ 加载指定工作流实例的状态。 """
+        pass
+
+    # --- 新增：为支持按 feature 查询实例 ---
+    @abstractmethod
+    def list_instances_by_feature(self, feature_id: str) -> List[Dict[str, Any]]:
         """
-        加载指定工作流实例的状态。
-
-        Args:
-            instance_id (str): 工作流实例的唯一标识符。
-
-        Returns:
-            Optional[Dict[str, Any]]: 工作流实例状态字典。如果实例不存在，返回 None。
-
-        Raises:
-            Exception: 如果加载失败（例如，数据损坏且无法修复），抛出相应异常。
+        根据特性 ID 列出所有相关的工作流实例状态。
+        这对于 get_feature_status 和 recommend_next_phase 等方法至关重要。
         """
-       pass
+        pass
+

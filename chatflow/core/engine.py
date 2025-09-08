@@ -16,18 +16,7 @@ class IWorkflowEngine(ABC):
 
     @abstractmethod
     def load_workflow_schema(self, name: str = "default") -> dict:
-        """
-        加载指定名称的工作流模式（YAML 定义）。
-
-        Args:
-            name (str, optional): 工作流名称 (默认 "default")。
-
-        Returns:
-            dict: 解析后的工作流 schema 字典。
-
-        Raises:
-            ValueError: 如果指定的工作流文件未找到。
-        """
+        """ 加载指定名称的工作流模式（YAML 定义）。 """
         pass
 
     @abstractmethod
