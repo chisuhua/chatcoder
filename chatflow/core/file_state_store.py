@@ -119,3 +119,32 @@ class FileWorkflowStateStore(IWorkflowStateStore):
                 continue
         
         return matching_states
+
+    def list_instances_by_feature(self, feature_id: str) -> List[Dict[str, Any]]:
+        """
+        (FileWorkflowStateStore 特有) 根据特性 ID 加载所有相关实例的状态。
+        通过扫描所有状态文件并检查其内容实现。
+        注意：这在大型项目中可能效率不高。
+        """
+        matching_states = []
+        # 确保基目录存在，如果不存在则直接返回空列表
+        if not self.base_dir.exists():
+            return matching_states
+
+        # 遍历基目录下所有 .json 文件
+        for state_file in self.base_dir.glob("*.json"):
+            try:
+                # 打开并加载 JSON 文件内容
+                with open(state_file, 'r', encoding='utf-8') as f:
+                    state_data = json.load(f)
+                # 检查状态数据中是否包含 'feature_id' 字段且其值与查询的 feature_id 匹配
+                # 这要求在保存状态时，必须将 feature_id 包含在 state_data 字典中
+                if state_data.get("feature_id") == feature_id:
+                    matching_states.append(state_data)
+            except (json.JSONDecodeError, IOError, KeyError):
+                # 跳过损坏的、无法读取的或不包含 'feature_id' 字段的文件
+                # 可以选择记录警告日志
+                # print(f"Warning: Skipping invalid or unreadable state file {state_file}")
+                continue
+        # 返回所有匹配的实例状态数据列表
+        return matching_states

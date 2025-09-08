@@ -7,6 +7,7 @@ ChatFlow 核心数据模型
 from dataclasses import dataclass, field
 from typing import Dict, Any, List, Optional
 from enum import Enum
+import yaml
 
 class WorkflowInstanceStatus(Enum):
     """
@@ -40,11 +41,31 @@ class WorkflowInstanceState:
     # 可以根据需要添加更多字段，例如：
     # metadata: Dict[str, Any] = field(default_factory=dict) # 用户或系统元数据
 
-# --- 保留原有的 TaskStatus 枚举占位符或导入 ---
-# 如果 chatflow 内部也需要类似的任务状态概念，可以保留或重新定义
-# 但为了避免与 ChatCoder 的 TaskStatus 混淆，最好使用不同的名称或作用域
-# 例如，专门用于 ChatFlow 内部任务（如果有的话）的状态
-# class ChatFlowTaskStatus(Enum):
-#     PENDING = "pending"
-#     IN_PROGRESS = "in_progress"
-#     DONE = "done"
+@dataclass
+class WorkflowPhaseDefinition:
+    """表示工作流定义中的一个阶段。"""
+    name: str
+    title: str
+    template: str
+    # 可以添加更多配置，如条件、超时等
+    # condition: Optional[str] = None
+    # timeout_seconds: Optional[int] = None
+
+@dataclass
+class WorkflowDefinition:
+    """表示一个完整的工作流定义。"""
+    name: str
+    description: str
+    phases: List[WorkflowPhaseDefinition]
+
+    @classmethod
+    def from_dict(cls, data: dict) -> 'WorkflowDefinition':
+        """从字典（通常是 YAML 加载的结果）创建 WorkflowDefinition 实例。"""
+        name = data.get("name", "unnamed")
+        description = data.get("description", "")
+        phases_data = data.get("phases", [])
+        phases = [WorkflowPhaseDefinition(**pd) for pd in phases_data]
+        return cls(name=name, description=description, phases=phases)
+
+
+

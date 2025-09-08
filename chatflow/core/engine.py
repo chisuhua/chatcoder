@@ -7,7 +7,7 @@ ChatFlow 核心接口 - 工作流引擎 (IWorkflowEngine)
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional, List
 # 假设核心数据结构定义在 models.py 中
-# from .models import WorkflowDefinition, WorkflowInstanceStatus, ContextRequest
+from .models import WorkflowInstanceState, WorkflowInstanceStatus, WorkflowDefinition
 
 class IWorkflowEngine(ABC):
     """
@@ -61,6 +61,35 @@ class IWorkflowEngine(ABC):
         """
         pass
 
+    @abstractmethod
+    def start_workflow_instance(self, workflow_definition: WorkflowDefinition, initial_context: Dict[str, Any], feature_id: str) -> str:
+        """
+        启动一个新的工作流实例。
+
+        Args:
+            workflow_definition (WorkflowDefinition): 工作流定义对象。
+            initial_context (Dict[str, Any]): 初始上下文。
+            feature_id (str): 关联的特性 ID。
+
+        Returns:
+            str: 新创建的工作流实例 ID。
+        """
+        pass
+
+    @abstractmethod
+    def trigger_next_step(self, instance_id: str, trigger_data: Optional[Dict[str, Any]] = None) -> WorkflowInstanceState:
+        """
+        触发工作流实例的下一步执行。
+
+        Args:
+            instance_id (str): 工作流实例 ID。
+            trigger_data (Optional[Dict[str, Any]]): 触发数据（例如，来自 AI 的输出）。
+
+        Returns:
+            WorkflowInstanceState: 更新后的工作流实例状态。
+        """
+        pass
+
     # 可以在这里添加更多抽象方法，例如 determine_next_phase
     # @abstractmethod
     # def determine_next_phase(self, current_phase: str, ai_response_content: str, context: Dict[str, Any]) -> Optional[str]:
@@ -74,21 +103,6 @@ class IWorkflowEngine(ABC):
     #
     #     Returns:
     #         Optional[str]: 建议的下一个阶段名称。如果应遵循标准工作流，则返回 None。
-    #     """
-    #     pass
-
-    # 未来可能的接口方法 (为演进预留)
-    # @abstractmethod
-    # def start_workflow_instance(self, workflow_definition: 'WorkflowDefinition', initial_context: 'ContextRequest') -> str:
-    #     """
-    #     启动一个新的工作流实例。
-    #
-    #     Args:
-    #         workflow_definition (WorkflowDefinition): 工作流定义。
-    #         initial_context (ContextRequest): 初始上下文。
-    #
-    #     Returns:
-    #         str: 新创建的工作流实例 ID。
     #     """
     #     pass
 

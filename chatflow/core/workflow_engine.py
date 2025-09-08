@@ -2,6 +2,7 @@
 """
 ChatFlow 核心实现 - 工作流引擎 (WorkflowEngine)
 提供工作流定义加载、特性状态管理和智能阶段推荐的具体实现。
+并管理 WorkflowInstanceState 的生命周期。
 """
 
 import yaml
@@ -11,7 +12,7 @@ from typing import Dict, Any, Optional, List
 from datetime import datetime
 from .engine import IWorkflowEngine
 from .state import IWorkflowStateStore
-from .models import WorkflowInstanceState, WorkflowInstanceStatus # 导入新模型
+from .models import WorkflowInstanceState, WorkflowInstanceStatus, WorkflowDefinition
 
 # --- 配置 ---
 PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
@@ -20,7 +21,6 @@ TEMPLATES_DIR = PROJECT_ROOT / "ai-prompts"
 def get_workflow_path() -> Path:
     """获取工作流定义文件的目录路径 (内部辅助函数)"""
     return TEMPLATES_DIR / "workflows"
-
 
 class WorkflowEngine(IWorkflowEngine):
     """
@@ -58,28 +58,21 @@ class WorkflowEngine(IWorkflowEngine):
             return schema["phases"][current_idx + 1]["name"]
         return None
 
-    # --- 新增：工作流实例生命周期管理方法 ---
-    
-    def start_workflow_instance(self, workflow_definition: dict, initial_context: Dict[str, Any], feature_id: str) -> str:
+    def start_workflow_instance(self, workflow_definition: WorkflowDefinition, initial_context: Dict[str, Any], feature_id: str) -> str:
         """
         启动一个新的工作流实例。
-
-        Args:
-            workflow_definition (dict): 工作流定义 schema。
-            initial_context (Dict[str, Any]): 初始上下文。
-            feature_id (str): 关联的 ChatCoder 特性 ID。
-
-        Returns:
-            str: 新创建的工作流实例 ID。
         """
         instance_id = f"wfi_{uuid.uuid4().hex[:12]}"
         now_iso = datetime.now().isoformat()
         
+        # 确定起始阶段 (通常是第一个阶段)
+        starting_phase = workflow_definition.phases[0].name if workflow_definition.phases else None
+
         initial_state = WorkflowInstanceState(
             instance_id=instance_id,
             feature_id=feature_id,
-            workflow_name=workflow_definition.get("name", "unknown"),
-            current_phase=None, # 初始阶段将在第一次推荐时确定
+            workflow_name=workflow_definition.name,
+            current_phase=starting_phase,
             history=[],
             variables=initial_context, # 将初始上下文存为变量
             status=WorkflowInstanceStatus.CREATED,
@@ -89,7 +82,49 @@ class WorkflowEngine(IWorkflowEngine):
         
         # 保存初始状态
         self.save_workflow_instance_state(initial_state)
+        print(f"✅ Started new workflow instance: {instance_id} for feature: {feature_id}")
         return instance_id
+
+    def trigger_next_step(self, instance_id: str, trigger_data: Optional[Dict[str, Any]] = None) -> WorkflowInstanceState:
+        """
+        触发工作流实例的下一步执行。
+        这是一个简化的示例实现，实际逻辑会更复杂。
+        """
+        # 1. 加载当前实例状态
+        current_state = self.load_workflow_instance_state(instance_id)
+        if not current_state:
+            raise ValueError(f"Workflow instance {instance_id} not found.")
+
+        # 2. 简单示例逻辑：更新状态并前进到下一阶段
+        #    实际中，这里会分析 trigger_data, 执行任务，更新 variables/history
+        current_state.history.append({
+            "phase": current_state.current_phase,
+            "triggered_at": datetime.now().isoformat(),
+            "trigger_data_summary": str(trigger_data)[:100] + "..." if trigger_data and len(str(trigger_data)) > 100 else str(trigger_data)
+        })
+
+        # 3. 获取工作流定义以确定下一阶段
+        try:
+            workflow_schema = self.load_workflow_schema(current_state.workflow_name)
+            next_phase = self.get_next_phase(workflow_schema, current_state.current_phase or "")
+            if next_phase:
+                current_state.current_phase = next_phase
+                current_state.status = WorkflowInstanceStatus.RUNNING
+            else:
+                # 如果没有下一阶段，标记为完成
+                current_state.status = WorkflowInstanceStatus.COMPLETED
+        except ValueError as e:
+            print(f"⚠️  Error loading workflow schema for {instance_id}: {e}")
+            current_state.status = WorkflowInstanceStatus.FAILED
+
+        # 4. 更新时间戳
+        current_state.updated_at = datetime.now().isoformat()
+
+        # 5. 保存更新后的状态
+        self.save_workflow_instance_state(current_state)
+
+        print(f"✅ Triggered next step for instance {instance_id}. New phase: {current_state.current_phase}, Status: {current_state.status.value}")
+        return current_state
 
     def save_workflow_instance_state(self, state: WorkflowInstanceState) -> None:
         """
@@ -164,18 +199,9 @@ class WorkflowEngine(IWorkflowEngine):
         try:
             # 假设 IWorkflowStateStore 已扩展 list_instances_by_feature
             instance_states_data = self.state_store.list_instances_by_feature(feature_id)
-        except AttributeError:
-            # 如果 state_store 实现不支持，需要一个 fallback 或抛出错误
-            # 这表明 state_store 实现需要更新
-            print("Warning: State store does not support list_instances_by_feature. Feature status might be incomplete.")
+        except (AttributeError, NotImplementedError):
+            print("Warning: State store does not fully support list_instances_by_feature. Feature status might be incomplete.")
             instance_states_data = []
-        except NotImplementedError:
-             print("Warning: State store list_instances_by_feature not implemented. Feature status might be incomplete.")
-             instance_states_data = []
-
-        # 将字典数据转换为 WorkflowInstanceState 对象 (如果需要内部处理)
-        # instance_states = [self.load_workflow_instance_state(data['instance_id']) for data in instance_states_data if data]
-        # 为简化，直接使用字典数据进行聚合
 
         status = {
             "feature_id": feature_id,
@@ -193,14 +219,10 @@ class WorkflowEngine(IWorkflowEngine):
             status["phases"][phase["name"]] = "not-started"
 
         # 基于实例状态聚合特性状态
-        # 简化逻辑：假设每个实例代表一个阶段的执行或尝试
-        # 更复杂的逻辑可能需要分析 instance_state.history
         completed_phases = set()
         all_phases_encountered = set()
 
         for state_data in instance_states_data:
-            # state_obj = self.load_workflow_instance_state(state_data.get('instance_id'))
-            # if not state_obj: continue
             phase_name = state_data.get("current_phase")
             if phase_name:
                 all_phases_encountered.add(phase_name)
@@ -213,14 +235,14 @@ class WorkflowEngine(IWorkflowEngine):
                 elif status_from_instance in [WorkflowInstanceStatus.RUNNING.value, WorkflowInstanceStatus.PAUSED.value]:
                      status["phases"][phase_name] = "in-progress"
                 else: # CREATED, FAILED
-                     status["phases"][phase_name] = "started" # 或其他状态
+                     status["phases"][phase_name] = "started"
 
         # 确定当前和下一个阶段 (简化版逻辑)
         phase_order = self.get_phase_order(schema)
         ordered_phases = sorted(schema["phases"], key=lambda p: phase_order[p["name"]])
 
         last_completed_phase = None
-        for phase_info in reversed(ordered_phases): # 从后往前找最后一个完成的
+        for phase_info in reversed(ordered_phases):
             if phase_info["name"] in completed_phases:
                 last_completed_phase = phase_info["name"]
                 break
@@ -229,11 +251,10 @@ class WorkflowEngine(IWorkflowEngine):
         if last_completed_phase:
             status["next_phase"] = self.get_next_phase(schema, last_completed_phase)
         elif ordered_phases:
-            status["next_phase"] = ordered_phases[0]["name"] # 第一个阶段
+            status["next_phase"] = ordered_phases[0]["name"]
 
         status["completed_count"] = len(completed_phases)
         return status
-
 
     def determine_next_phase(self, current_phase: str, ai_response_content: str, context: Dict[str, Any]) -> Optional[str]:
         """
@@ -252,10 +273,7 @@ class WorkflowEngine(IWorkflowEngine):
         """
         为给定特性推荐下一个阶段。
         """
-        try:
-            status = self.get_feature_status(feature_id, schema_name)
-        except NotImplementedError:
-            raise 
+        status = self.get_feature_status(feature_id, schema_name)
 
         if not status.get("next_phase"):
             return None
@@ -263,33 +281,9 @@ class WorkflowEngine(IWorkflowEngine):
         standard_next_phase = status.get("next_phase")
         current_phase = status.get("current_phase")
 
-        # --- 简化：这里不再直接查询 ChatCoder 任务 ---
-        # 因为 ChatFlow 现在管理自己的实例状态，它应该有足够的信息来做决定
-        # 或者，这个方法可以只返回阶段名称，让 ChatCoder 决定如何处理
-        
-        # 为了兼容旧接口，我们仍然返回字典
-        # 但逻辑基于 ChatFlow 内部状态
-        
-        # (这里可以添加更复杂的逻辑，例如查询特定实例的详细输出进行分析)
-        # 为了演示，我们使用一个简化的逻辑
-        
-        # 假设我们总是有实例数据，可以进行分析
-        # 实际上，get_feature_status 内部已经聚合了实例信息
-        # 我们可以在这里添加更精细的决策，但现在直接使用标准逻辑
-        
-        # 一个更真实的例子：分析最后一个实例的输出
-        # 但这需要保存 AI 输出到 instance_state.history 或 variables 中
-        # instance_states_data = self.state_store.list_instances_by_feature(feature_id)
-        # if instance_states_data:
-        #     # 分析最后一个实例...
-        #     # smart_phase = self.determine_next_phase(...)
-        #     # if smart_phase: ...
-        #     pass
-
         return {
             "phase": standard_next_phase,
             "reason": "Following standard workflow sequence or smart decision based on instance analysis.",
-            "source": "standard_or_smart", # 或 "chatflow_internal"
+            "source": "standard_or_smart",
             "current_phase": current_phase
         }
-    # --- 修改结束 ---
