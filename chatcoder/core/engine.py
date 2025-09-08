@@ -8,13 +8,10 @@ ChatCoder 核心服务 - 工作流引擎 (WorkflowEngine) [适配器]
 import yaml
 from pathlib import Path
 from typing import Dict, Any, Optional, List
-# --- 导入 ChatCoder 内部依赖 ---
 from .orchestrator import TaskOrchestrator
 from .models import TaskStatus
 
-# --- 导入 chatflow 库 (如果可用) ---
 try:
-    # 从 chatflow 库导入核心类
     from chatflow.core.workflow_engine import WorkflowEngine as ChatFlowEngine
     from chatflow.core.state import IWorkflowStateStore
     from chatflow.core.file_state_store import FileWorkflowStateStore
@@ -65,7 +62,7 @@ class WorkflowEngine:
         if CHATFLOW_AVAILABLE:
             try:
                 state_store = FileWorkflowStateStore()
-                self._chatflow_engine = ChatFlowEngine(state_store=state_store_adapter)
+                self._chatflow_engine = ChatFlowEngine(state_store=state_store)
                 print("✅ chatflow engine successfully initialized as adapter.")
             except Exception as e:
                 print(f"⚠️  Warning: Failed to initialize chatflow engine: {e}")
@@ -82,7 +79,6 @@ class WorkflowEngine:
         """
         return get_workflow_path()
 
-    # --- 修改：委派给 chatflow 或使用旧逻辑 ---
     def load_workflow_schema(self, name: str = "default") -> dict:
         """
         加载指定名称的工作流模式（YAML 定义）。
@@ -114,7 +110,6 @@ class WorkflowEngine:
                  # Fallback to legacy if chatflow fails
                  pass
 
-        # --- 旧逻辑 (后备) ---
         return {phase["name"]: idx for idx, phase in enumerate(schema["phases"])}
 
     def get_next_phase(self, schema: dict, current_phase: str) -> Optional[str]:
@@ -153,7 +148,6 @@ class WorkflowEngine:
                  # Fallback to legacy if chatflow fails unexpectedly
                  pass
 
-        # --- 旧逻辑 (后备或 chatflow 不可用/不完整时) ---
         tasks = self.task_orchestrator.list_task_states()
         try:
             schema = self.load_workflow_schema(schema_name)
@@ -218,7 +212,6 @@ class WorkflowEngine:
                 # Fallback to legacy if chatflow fails
                 pass
 
-        # --- 旧逻辑 (后备) ---
         content_lower = ai_response_content.lower()
         if "security" in content_lower and ("risk" in content_lower or "impact" in content_lower):
             return "security_review"
@@ -242,7 +235,6 @@ class WorkflowEngine:
                  # Fallback to legacy if chatflow fails unexpectedly
                  pass
 
-        # --- 旧逻辑 (后备) ---
         status = self.get_feature_status(feature_id, schema_name)
         if not status.get("next_phase"):
             return None
@@ -302,4 +294,3 @@ class WorkflowEngine:
                 "source": "standard",
                 "current_phase": current_phase
             }
-    # --- 修改结束 ---

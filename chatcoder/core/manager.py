@@ -2,15 +2,30 @@
 """
 ChatCoder 核心服务 - AI 交互管理器 (AIInteractionManager)
 负责与 AI 交互相关的核心操作，主要是提示词的渲染。
+现在更新为优先使用 chatcontext 库获取上下文。
 """
 
 import os
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Tuple
 import jinja2
-
 from ..utils.console import console
-from .context import generate_context_snapshot # 确保导入了更新后的函数
+try:
+    from chatcontext.core.manager import ContextManager
+    from chatcontext.core.providers import ProjectInfoProvider, CoreFilesProvider
+    from chatcontext.core.models import ContextRequest
+    CHATCONTEXT_AVAILABLE = True
+    # print("✅ [DEBUG] chatcontext library successfully imported.")
+except ImportError:
+    # 如果 chatcontext 库不可用，则在需要时直接报错
+    print("⚠️  Warning: chatcontext library not found. Using legacy context generation.")
+    CHATCONTEXT_AVAILABLE = False
+    ContextManager = None
+    ProjectInfoProvider = None
+    CoreFilesProvider = None
+    ContextRequest = None
+
+from .context import generate_context_snapshot as legacy_generate_context_snapshot
 
 # 📁 模板根目录（相对于当前文件）
 PROJECT_ROOT = Path(__file__).parent.parent.parent
@@ -51,9 +66,9 @@ class AIInteractionManager:
         loader = jinja2.FileSystemLoader(str(TEMPLATES_DIR))
         env = jinja2.Environment(
             loader=loader,
-            autoescape=False,
-            trim_blocks=True,
-            lstrip_blocks=True,
+            autoescape=False,  # Markdown 不需要 HTML 转义
+            trim_blocks=True,  # 去除块后的换行
+            lstrip_blocks=True, # 去除块前的空白
         )
         return env
 
@@ -101,7 +116,9 @@ class AIInteractionManager:
         Raises:
             FileNotFoundError: 如果模板文件未找到。
             jinja2.TemplateError: 如果模板渲染过程中发生错误。
+            RuntimeError: 如果需要 chatcontext 但其不可用。
         """
+
         # 1. 解析模板路径
         resolved_rel_path = self._resolve_template_path(template)
         template_file = TEMPLATES_DIR / resolved_rel_path
@@ -141,10 +158,64 @@ class AIInteractionManager:
             env = self._create_jinja_env()
             jinja_template = env.get_template(rel_path_forward)
 
-            # 从 kwargs 中获取 'phase' 参数，传递给 generate_context_snapshot
+            # 4. 生成核心上下文
+            # --- 修改点：使用 chatcontext 或报错 ---
+            context: Dict[str, Any] = {}
             current_phase = kwargs.get('phase')
-            context = generate_context_snapshot(phase=current_phase) # 新的调用方式
-            
+
+            if CHATCONTEXT_AVAILABLE:
+                try:
+                    # --- 新逻辑：使用 chatcontext ---
+                    # 1. 创建 ContextManager 和 Providers
+                    cm = ContextManager()
+                    cm.register_provider(ProjectInfoProvider())
+                    cm.register_provider(CoreFilesProvider())
+
+                    # 2. 构造 ContextRequest
+                    #    从 kwargs 或 previous_task 中获取信息
+                    workflow_instance_id_from_kwargs = kwargs.get('feature_id') # 获取 feature_id 的值
+                    workflow_instance_id = None
+                    feature_id = None # 保留 feature_id 变量用于其他可能需要的地方
+                    if previous_task and 'feature_id' in previous_task:
+                        workflow_instance_id = previous_task['feature_id'] # 使用 previous_task 的 feature_id
+                        feature_id = workflow_instance_id # 同时也赋值给 feature_id
+                    elif workflow_instance_id_from_kwargs:
+                        workflow_instance_id = workflow_instance_id_from_kwargs
+                        feature_id = workflow_instance_id_from_kwargs
+                    else:
+                        # 如果都没有，可以生成一个临时的或使用占位符
+                        workflow_instance_id = "temp_workflow_instance_id_for_prompt"
+                        feature_id = workflow_instance_id # 保持一致
+
+                    # 3. 创建请求对象
+                    context_request = ContextRequest( # <-- 修正后的参数名
+                        workflow_instance_id=workflow_instance_id, # <-- 使用正确的参数名
+                        phase_name=current_phase or template,       # <-- 其他参数保持不变
+                        task_description=description,
+                        previous_outputs=previous_task or {},
+                        # user_inputs=... # 从 kwargs 中提取
+                    )
+                    # print(f"✅ [DEBUG] Constructed ContextRequest: {context_request}")
+
+                    # 4. 调用 chatcontext
+                    context = cm.get_context(context_request)
+                    # print(f"✅ [DEBUG] Successfully retrieved context from chatcontext.")
+                except Exception as e:
+                    print(f"⚠️  [DEBUG] Error using chatcontext: {e}")
+                    # 根据策略决定是回退还是报错
+                    # 如果是核心功能依赖 chatcontext，则报错
+                    raise RuntimeError(f"Failed to get context from chatcontext: {e}") from e
+            else:
+                # --- 核心功能依赖 chatcontext，但其不可用 -> 直接报错 ---
+                #raise RuntimeError(
+                #   "Context-aware prompt generation requires the 'chatcontext' library, "
+                #   "but it is not installed or not found. "
+                #   "Please install it to proceed with context-aware features. "
+                #   "You can install it using: pip install chatcontext"
+                #
+                print("⚠️  chatcontext not available, falling back to minimal legacy context generation.")
+                context = legacy_generate_context_snapshot(phase=current_phase)
+
             context.update(kwargs)  # 合并额外参数
 
             # 5. 注入核心变量
@@ -166,7 +237,7 @@ class AIInteractionManager:
             console.print(f"[red]❌ 渲染提示词时发生未知错误: {e}[/red]")
             raise
 
-    # --- 便捷方法 (可选，保持与 prompt.py 一致) ---
+    # --- 便捷方法 (保持不变) ---
     def render_analyze_prompt(self, description: str, previous_task: Optional[Dict[str, Any]] = None, **kwargs) -> str:
         """便捷方法：渲染 analyze 模板"""
         return self.render_prompt("analyze", description, previous_task, **kwargs)
@@ -187,7 +258,7 @@ class AIInteractionManager:
         """便捷方法：渲染 summary 模板"""
         return self.render_prompt("summary", description, previous_task, **kwargs)
 
-    # --- 辅助方法 ---
+    # --- 辅助方法 (保持不变) ---
     def list_available_templates(self) -> List[Tuple[str, str, bool]]:
         """
         扫描 ai-prompts 目录，列出所有可用模板。
@@ -249,7 +320,37 @@ class AIInteractionManager:
             # 3. 生成上下文快照 (修改点：尝试传递 phase 进行调试)
             # 为了调试，我们可以假设一个 phase，或者从 extra_context 获取
             debug_phase = extra_context.get('phase', 'debug_phase') # 默认值
-            context = generate_context_snapshot(phase=debug_phase) # 调试时也传递 phase
+            
+            # --- 修改点：调试时也使用 chatcontext 或报错 ---
+            context: Dict[str, Any] = {}
+            if CHATCONTEXT_AVAILABLE:
+                try:
+                    # 简化调试用的 ContextRequest
+                    debug_cm = ContextManager()
+                    debug_cm.register_provider(ProjectInfoProvider())
+                    debug_cm.register_provider(CoreFilesProvider())
+                    # (未来可能需要注册调试用的 Provider)
+                    debug_request = ContextRequest(
+                        feature_id="debug_feature_id",
+                        phase_name=debug_phase,
+                        task_description="这是一条调试任务描述",
+                        previous_outputs=extra_context.get("has_previous", True) and {"task_id": "task_debug_123", "template": "analyze", "description": "上一个调试任务"} or {},
+                        user_inputs={} # 可以从 extra_context 获取
+                    )
+                    context = debug_cm.get_context(debug_request)
+                    # print(f"✅ [DEBUG] Debug context retrieved from chatcontext.")
+                except Exception as e:
+                    print(f"⚠️  [DEBUG] Debug: Error using chatcontext for debug render: {e}.")
+                    # 可以选择回退或报错，这里为了调试继续
+                    raise RuntimeError(f"Debug: Failed to get context from chatcontext: {e}") from e
+            else:
+                # 调试时也需要 chatcontext
+                raise RuntimeError(
+                    "Debug rendering with context requires the 'chatcontext' library, "
+                    "but it is not installed or not found. "
+                )
+            # --- 修改点结束 ---
+            
             context.update(extra_context)
             context.update({
                 "description": "这是一条调试任务描述",
@@ -261,13 +362,15 @@ class AIInteractionManager:
             })
 
             console.print(f"\n[bold]🧠 渲染上下文:[/bold]")
-            for k, v in list(context.items())[:20]: # 限制显示的上下文项数
+            # 限制显示的上下文项数
+            context_items = list(context.items())
+            for k, v in context_items[:20]:
                 if isinstance(v, str) and len(v) > 100:
                     console.print(f"  {k}: [dim]{v[:100]}...[/dim]")
                 else:
                     console.print(f"  {k}: {v}")
-            if len(context) > 20:
-                 console.print(f"  ... (共 {len(context)} 项上下文，已显示前 20 项)")
+            if len(context_items) > 20:
+                 console.print(f"  ... (共 {len(context_items)} 项上下文，已显示前 20 项)")
 
             # 4. 渲染
             console.print(f"\n[bold]✨ 正在渲染...[/bold]")
@@ -284,14 +387,3 @@ class AIInteractionManager:
             console.print(f"[red]❌ 调试失败: {e}[/red]")
             import traceback
             console.print(f"[dim]{traceback.format_exc()}[/dim]")
-
-# --- 为了兼容旧代码，可以保留这些函数作为模块级函数（可选）---
-# --- 或者在 CLI 完全迁移后删除 ---
-# def render_prompt(template: str, description: str, previous_task: Optional[Dict[str, Any]] = None, **kwargs) -> str:
-#     return AIInteractionManager().render_prompt(template, description, previous_task, **kwargs)
-#
-# def list_available_templates() -> List[Tuple[str, str, bool]]:
-#     return AIInteractionManager().list_available_templates()
-#
-# def debug_render(template: str, **extra_context):
-#     return AIInteractionManager().debug_render(template, **extra_context)

@@ -1,7 +1,10 @@
 # chatcoder/core/context.py
 """
-上下文管理模块：负责初始化项目、解析上下文、生成快照
+上下文管理模块：负责初始化项目、解析上下文、生成快照 (简化版后备)
+[注意] 此模块现在主要作为 chatcontext 库不可用时的极简后备方案。
+核心的、动态的上下文生成功能已迁移至 chatcontext 库。
 """
+
 from pathlib import Path
 import hashlib
 import yaml
@@ -19,18 +22,7 @@ DEFAULT_CONTEXT = {
     "project_description": "未提供项目描述"
 }
 
-PHASE_SPECIFIC_PATTERNS = {
-    # 分析和设计阶段：关注项目结构、模型、接口定义、配置
-    "analyze": ["**/models.py", "**/schemas.py", "**/interfaces.py", "**/types.py", "**/config.py", "**/settings.py"],
-    "design": ["**/interfaces.py", "**/abstract*.py", "**/base*.py", "**/models.py", "**/schemas.py", "**/api/*.py"],
-    # 实现阶段：关注工具函数、辅助类、核心业务逻辑、以及可能被修改的文件
-    "implement": ["**/utils.py", "**/helpers.py", "**/common/*.py", "**/lib/*.py", "**/services/*.py", "**/core/*.py"],
-    # 测试阶段：关注测试文件和被测试的实现
-    "test": ["**/tests/**/*", "**/*test*.py", "**/test_*.py", "**/spec/**/*"],
-    # 通用阶段或其他未指定阶段
-    # "default": [...] # 可以定义，但下面的逻辑会回退到 CORE_PATTERNS
-}
-
+# --- 精简后备：保留一个非常基础的 CORE_PATTERNS ---
 CORE_PATTERNS = {
     "python": ["**/*.py"],
     "python-django": ["**/models.py", "**/views.py", "**/apps.py"],
@@ -46,8 +38,8 @@ def parse_context_file() -> Dict[str, Any]:
     解析 context.yaml 文件，返回字典。
     """
     if not CONTEXT_FILE.exists():
+        # 不抛出 FileNotFoundError，而是返回空字典或默认值，更宽容
         raise FileNotFoundError(f"上下文文件不存在: {CONTEXT_FILE}")
-
     try:
         with open(CONTEXT_FILE, 'r', encoding='utf-8') as f:
             data = yaml.safe_load(f)
@@ -86,284 +78,99 @@ def load_core_patterns_from_config() -> Optional[List[str]]:
         return None
 
 
-def generate_context_snapshot(phase: Optional[str] = None): # 新的
+def generate_context_snapshot(phase: Optional[str] = None) -> Dict[str, Any]:
     """
-    生成上下文快照，用于模板渲染。
+    [Minimal Backward Compatibility] 生成极简的上下文快照。
+    [注意] 复杂的上下文生成功能已由 chatcontext 库提供。
+    此函数仅作为 chatcontext 不可用时的极简后备。
 
     Args:
-        phase (Optional[str]): 当前任务的阶段 (e.g., 'analyze', 'design', 'implement').
-                               用于动态调整上下文内容。
+        phase (Optional[str]): 当前任务的阶段 (保留参数，但不再用于逻辑)。
+
+    Returns:
+        Dict[str, Any]: 包含极简上下文信息的字典。
     """
-    # --- 修改点结束 ---
     try:
-        ctx = parse_context_file()
+        # 1. 加载用户定义的上下文
+        user_context = parse_context_file()
+        # 过滤掉空值
+        non_empty_user_context = {k: v for k, v in user_context.items() if v}
 
-        # === 1. 构建 Markdown 格式的上下文摘要（原有逻辑）===
-        snapshot = "## 🧩 项目上下文\n"
-        if ctx:
-            # 过滤掉空值
-            non_empty_ctx = {k: v for k, v in ctx.items() if v}
-            if non_empty_ctx:
-                snapshot += "\n".join(f"- {k}: {v}" for k, v in non_empty_ctx.items())
-            else:
-                snapshot += "- 无上下文信息"
-        else:
-            snapshot += "- 无上下文信息"
-
+        # 2. 探测项目类型
         project_type = detect_project_type()
-        # print(f"[DEBUG] Detected project type: {project_type}") # 可选调试
 
-        # 优先从 config.yaml 加载
+        # 3. 构建极简的 Markdown 格式的上下文摘要
+        snapshot_lines = ["## 🧩 项目上下文 (Fallback Mode)"]
+        snapshot_lines.append("- ⚠️  Complex context generation is handled by the 'chatcontext' library.")
+        snapshot_lines.append("- ℹ️  This is a minimal fallback snapshot.")
+        snapshot_lines.append(f"- 📁 Project Type: {project_type}")
+        
+        if non_empty_user_context:
+            snapshot_lines.append("\n### 📝 用户定义:")
+            snapshot_lines.extend(f"- {k}: {v}" for k, v in non_empty_user_context.items())
+        else:
+            snapshot_lines.append("- 无用户定义上下文信息")
+
+        # 4. (可选) 尝试加载非常基础的核心文件列表 (作为演示，非必需)
+        #    这只是为了展示即使在后备模式下也能做一些事
         core_patterns = load_core_patterns_from_config()
         if not core_patterns:
-            # print(f"[DEBUG] No core_patterns in config, using defaults for {project_type} and phase {phase}") # 可选调试
-
-            # 如果 config 中没有定义，则根据 phase 和 project_type 动态选择
-            if phase and phase in PHASE_SPECIFIC_PATTERNS:
-                # 1. 首选：使用与当前 phase 相关的预定义模式
-                core_patterns = PHASE_SPECIFIC_PATTERNS[phase]
-                # print(f"[DEBUG] Using phase-specific patterns for '{phase}'") # 可选调试
-            else:
-                # 2. 回退：使用基于项目类型的通用模式
-                core_patterns = CORE_PATTERNS.get(project_type, ["**/*.py"])
-                # print(f"[DEBUG] Using project-type patterns for '{project_type}' or default") # 可选调试
-
-        core_files = {}
+            core_patterns = CORE_PATTERNS.get(project_type, ["**/*.py"])
+        
+        snapshot_lines.append(f"\n### 🔍 基础文件扫描 (Patterns: {', '.join(core_patterns[:3])}...):")
         root_path = Path(".")
-        for pattern in core_patterns:
-            try:
-                # print(f"[DEBUG] Searching for pattern: {pattern}") # 可选调试
-                for file_path in root_path.glob(pattern):
-                    # print(f"[DEBUG] Found file: {file_path}") # 可选调试
-                    if not file_path.is_file():
-                        continue
-                    content = read_file_safely(file_path)
-                    if not content:
-                        continue
-                    # 计算哈希
-                    file_hash = hashlib.md5(content.encode()).hexdigest()[:8]
-                    # 提取关键片段
-                    snippet = _extract_code_snippet(content, file_path.suffix)
-                    core_files[str(file_path)] = {
-                        "hash": file_hash,
-                        "snippet": snippet
-                    }
-            except Exception as e:
-                # 捕获单个 pattern 的错误，避免中断整个过程
-                print(f"⚠️  处理模式 '{pattern}' 时出错: {e}")
+        basic_file_count = 0
+        core_files = {}
+        for pattern in core_patterns[:2]: # 限制模式数量
+            for file_path in root_path.glob(pattern):
+                if not file_path.is_file():
+                    continue
+                content = read_file_safely(file_path)
+                if not content:
+                    continue
+                basic_file_count += 1
+                snapshot_lines.append(f"- 📄 {file_path}")
+                file_hash = hashlib.md5(content.encode()).hexdigest()[:8]
+                core_files[str(file_path)] = {
+                     "hash": file_hash,
+                     "snippet": content
+                }
 
-        # 添加到快照展示
-        if core_files:
-            snapshot += f"\n\n## 🔍 核心文件 ({len(core_files)} 个)\n"
-            # 按文件路径排序以保证一致性
-            for fp in sorted(core_files.keys()):
-                info = core_files[fp]
-                snapshot += f"- `{fp}` (hash:{info['hash']})\n"
-                if info.get("snippet") == " <empty> ":
-                    snapshot += "  → (空文件)\n"
-                else:
-                    lines = info["snippet"].splitlines()[:4] # 限制显示行数
-                    for line in lines:
-                        snapshot += f"  {line}\n"
-                    if len(info["snippet"].splitlines()) > 4:
-                        snapshot += "  ...\n"
 
-        # === 3. 构建最终结果：保留原有字段 + 新增核心文件信息 ===
+        if basic_file_count > 0:
+             snapshot_lines.append(f"- ... (共找到 {basic_file_count} 个文件，已显示前 5 个)")
+
+        snapshot = "\n".join(snapshot_lines)
+
+        # 5. 构建最终结果
         result = DEFAULT_CONTEXT.copy()
-        result.update(ctx)  # 用户配置优先
+        result.update(non_empty_user_context) # 用户配置优先
         result["context_snapshot"] = snapshot
         result["project_type"] = project_type
-        result["core_patterns"] = core_patterns # 可能有用，或用于调试
+        # 明确不包含 chatcontext 生成的动态信息
         result["core_files"] = core_files
+        #result["core_patterns"] = core_patterns
 
         return result
 
     except Exception as e:
         # 安全降级：返回默认上下文
-        print(f"⚠️ 生成上下文快照时出错: {e}") # 可选：记录到日志
+        print(f"⚠️ 生成后备上下文快照时出错: {e}") # 可选：记录到日志
         fallback = DEFAULT_CONTEXT.copy()
-        fallback["context_snapshot"] = f"## 🧩 项目上下文\n- 加载失败: {str(e)}"
+        fallback["context_snapshot"] = (
+            "## 🧩 项目上下文 (Fallback Mode)\n"
+            "- ❌ 加载失败或发生错误\n"
+            f"- 错误信息: {str(e)}\n"
+            "- ⚠️  Complex context generation is handled by the 'chatcontext' library.\n"
+            "- 请安装 chatcontext 以获取完整功能。"
+        )
         fallback["project_type"] = "unknown"
         fallback["core_files"] = {}
         fallback["core_patterns"] = []
         return fallback
 
 
-def _extract_code_snippet(content: str, suffix: str) -> str:
-    """
-    智能提取代码片段，按语言做语义化处理
-    """
-    content = content.strip()
-    if not content:
-        return " <empty> "
-    lines = content.splitlines()
-
-    # 根据后缀推断语言
-    lang = _suffix_to_lang(suffix)
-
-    # 截断最大行数
-    MAX_LINES = 15
-
-    # === 1. Python: 提取类、函数、import 和 main 入口 ===
-    if lang == "python":
-        # 保留 import
-        imports = [line for line in lines if line.startswith(("import ", "from "))]
-
-        # 找到前几个函数/类定义
-        defs = []
-        for i, line in enumerate(lines):
-            if line.startswith(("def ", "class ")) and not line.rstrip().endswith(": pass"):
-                block = _get_code_block(lines, i)
-                defs.append(block)
-                if len(defs) >= 2:
-                    break
-
-        # main 入口
-        main_block = None
-        for i, line in enumerate(lines):
-            if line.strip().startswith("if __name__ ") and "__main__" in line:
-                main_block = _get_code_block(lines, i)
-                break
-
-        parts = []
-        if imports:
-            # parts.append("...")  # 省略部分导入，保留最后几个
-            parts.extend(imports[-3:])  # 最后 3 个重要导入
-        if defs:
-            parts.append("# Key Functions/Classes: ")
-            parts.extend(defs)
-        if main_block:
-            parts.append("# Entry Point: ")
-            parts.append(main_block)
-        if not parts:
-             # 如果没找到特定结构，返回前几行
-             parts = lines[:5]
-
-        snippet = "\n".join(parts[:MAX_LINES])
-        return snippet + ("\n# ... (truncated)" if len(parts) > MAX_LINES else "")
-
-    # === 2. C++: 提取 include, class, struct, function ===
-    elif lang in ("cpp", "c"):
-        includes = [line for line in lines if line.strip().startswith("#include")]
-        classes_structs = []
-        functions = []
-        namespaces = []
-
-        for i, line in enumerate(lines):
-            stripped_line = line.strip()
-            if stripped_line.startswith("class ") or stripped_line.startswith("struct "):
-                # 简单提取类/结构体声明行
-                classes_structs.append(stripped_line.split("{")[0].rstrip() + " {...};")
-                if len(classes_structs) >= 2:
-                     # 避免过多
-                     classes_structs[-1] += " ..."
-                     break
-            elif stripped_line.startswith(("void ", "int ", "bool ", "std::", "template ")) and "(" in stripped_line and ");" in stripped_line:
-                 # 简单匹配函数声明
-                 functions.append(stripped_line)
-                 if len(functions) >= 3:
-                     functions[-1] += " ..."
-                     break
-            elif stripped_line.startswith("namespace "):
-                namespaces.append(stripped_line.split("{")[0].rstrip() + " {...}")
-
-        parts = []
-        if includes:
-            parts.extend(includes[:3]) # 前几个 include
-        if namespaces:
-             parts.append("// Namespaces: ")
-             parts.extend(namespaces[:1])
-        if classes_structs:
-            parts.append("// Classes/Structs: ")
-            parts.extend(classes_structs)
-        if functions:
-            parts.append("// Functions: ")
-            parts.extend(functions)
-        if not parts:
-             # 默认返回前几行
-             parts = lines[:5]
-
-        snippet = "\n".join(parts[:MAX_LINES])
-        return snippet + ("\n// ... (truncated)" if len(parts) > MAX_LINES else "")
-
-    # === 3. 默认：取前几行 + 后几行 ===
-    else:
-        if len(lines) <= MAX_LINES:
-            return content
-        else:
-            head = "\n".join(lines[:5])
-            tail = "\n".join(lines[-(MAX_LINES-5):])
-            return f"{head}\n...\n{tail}"
-
-
-def _get_code_block(lines: list, start_idx: int) -> str:
-    """
-    提取一个函数或类定义的完整块（含嵌套）
-    """
-    if start_idx >= len(lines):
-        return ""
-
-    block = [lines[start_idx].rstrip()] # 移除行尾换行符
-    # 更稳健地处理缩进
-    first_line_indent = len(lines[start_idx]) - len(lines[start_idx].lstrip())
-    i = start_idx + 1
-
-    while i < len(lines):
-        line = lines[i]
-        stripped_line = line.lstrip()
-        if not stripped_line:
-            block.append("") # 保留空行
-            i += 1
-            continue
-
-        # 计算当前行的实际缩进（空格数）
-        current_indent = len(line) - len(stripped_line)
-
-        # 如果当前行缩进小于起始行缩进，并且不是空行或注释，则可能是块结束
-        # （需要考虑非缩进语言如 C++ 的情况，这里主要适用于 Python）
-        # 对于 Python，这是一个合理的判断
-        if current_indent < first_line_indent and stripped_line not in ('#', '"""', "'''") and not stripped_line.startswith('#'):
-             # 检查是否是同级或更高级别的定义开始
-             if stripped_line.startswith(('def ', 'class ', 'if __name__')):
-                 break # 停在下一个同级定义前
-
-        block.append(line.rstrip()) # 移除行尾换行符
-        i += 1
-        if len(block) >= 20:  # 防止太长
-            block.append("    # ... (truncated in snippet)")
-            break
-
-    return "\n".join(block)
-
-
-# def _get_indent(line: str) -> int:
-#     return len(line) - len(line.lstrip())
-
-
-def _suffix_to_lang(suffix: str) -> Optional[str]:
-    mapping = {
-        ".py": "python",
-        # ".js": "javascript",
-        # ".ts": "typescript",
-        # ".go": "go",
-        # ".rs": "rust",
-        ".cpp": "cpp",
-        ".cc": "cpp",
-        ".cxx": "cpp",
-        ".c": "c",
-        ".h": "cpp", # Header for C/C++
-        ".hpp": "cpp",
-        # ".java": "java",
-        # ".rb": "ruby",
-        # ".php": "php"
-    }
-    return mapping.get(suffix.lower())
-
-
-# ------------------------------
-# 附加功能（可选，用于 init.py）
-# ------------------------------
-
+# --- 保留其他辅助函数和 CLI 调试函数 ---
 def ensure_context_dir() -> Path:
     """
     确保 .chatcoder 目录存在，并返回路径。
@@ -396,10 +203,6 @@ def get_context_value(key: str, default: Any = None) -> Any:
         return default
 
 
-# ------------------------------
-# 调试工具
-# ------------------------------
-
 def debug_print_context() -> None:
     """
     调试用：打印当前上下文内容（命令行工具可调用）
@@ -414,3 +217,4 @@ def debug_print_context() -> None:
             print("  (空)")
     except Exception as e:
         print(f"❌ 无法加载上下文: {e}")
+

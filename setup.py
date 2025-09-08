@@ -13,7 +13,8 @@ setup(
     # packages=find_packages(where="."), # Finds packages like ./chatcoder, ./chatflow, ./chatcontext
     
     # 或者，更明确地列出所有顶级包：
-    packages=find_packages(include=['chatcoder', 'chatcoder.*', 'chatflow', 'chatflow.*', 'chatcontext', 'chatcontext.*']),
+    packages=find_packages(where="."),
+    #packages=find_packages(include=['chatcoder', 'chatcoder.*', 'chatflow', 'chatflow.*', 'chatcontext', 'chatcontext.*']),
     # include=['chatcoder*', 'chatflow*', 'chatcontext*'] 也是一个常用选项
     # --- 修改点 1 结束 ---
 

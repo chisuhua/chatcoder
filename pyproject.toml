@@ -21,6 +21,7 @@ dependencies = [
     "click>=8.0.0",
     "jinja2>=3.0.0",
     "rich>=12.0.0",
+    "pyyaml",
 ]
 
 [project.optional-dependencies]
@@ -34,3 +35,7 @@ dev = [
 
 [project.scripts]
 chatcoder = "chatcoder.cli:cli"
+
+
+[tool.setuptools.packages.find]
+include = ["chatcoder*", "chatflow*", "chatcontext*"] # Ensure all sub-packages are included
