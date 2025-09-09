@@ -10,6 +10,7 @@ import uuid
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 from datetime import datetime
+from dataclasses import asdict # 需要导入 asdict 来处理 dataclass 对象
 from .engine import IWorkflowEngine
 from .state import IWorkflowStateStore
 from .models import WorkflowInstanceState, WorkflowInstanceStatus, WorkflowDefinition
@@ -44,19 +45,94 @@ class WorkflowEngine(IWorkflowEngine):
             return yaml.safe_load(custom_path.read_text(encoding="utf-8"))
         raise ValueError(f"Workflows schema not found: {name}")
 
-    def get_phase_order(self, schema: dict) -> Dict[str, int]:
-        """从工作流 schema 中提取阶段名称到其顺序的映射。"""
-        return {phase["name"]: idx for idx, phase in enumerate(schema["phases"])}
+    def get_phase_order(self, schema) -> Dict[str, int]:
+        """
+        从工作流 schema 中提取阶段名称到其顺序的映射。
 
-    def get_next_phase(self, schema: dict, current_phase: str) -> Optional[str]:
-        """根据工作流 schema 获取下一个阶段的名称。"""
-        order = self.get_phase_order(schema)
+        Args:
+            schema (Union[dict, WorkflowDefinition]): 工作流 schema 字典或 WorkflowDefinition 对象。
+
+        Returns:
+            Dict[str, int]: 阶段名称到顺序索引的映射。
+        """
+        # --- 修改点：增强兼容性，处理 dict 或 WorkflowDefinition 对象 ---
+        if hasattr(schema, 'phases'): # 检查是否为 WorkflowDefinition 对象
+            # 如果是对象，则访问其 .phases 属性
+            phases = schema.phases
+        elif isinstance(schema, dict) and 'phases' in schema:
+            # 如果是字典，则访问其 ['phases'] 键
+            phases = schema['phases']
+        else:
+            # 如果都不是，抛出错误或返回空字典 (更健壮的做法是抛出错误)
+            raise TypeError(f"Invalid schema type or missing 'phases' key: {type(schema)}, value: {schema}")
+        # --- 修改点结束 ---
+        
+        # 统一处理 phases 列表
+        # phases 列表中的元素现在可能是 dict (来自 YAML) 或 WorkflowPhaseDefinition 对象
+        return {
+            # --- 修改点：增强兼容性，处理 phases 列表中的元素 ---
+            # phase["name"]: idx for idx, phase in enumerate(phases) # 旧的，仅处理 dict
+            (phase.name if hasattr(phase, 'name') else phase["name"]): idx # 新的，处理对象或字典
+            for idx, phase in enumerate(phases)
+            # --- 修改点结束 ---
+        }
+
+    def get_next_phase(self, schema, current_phase: str) -> Optional[str]:
+        """
+        根据工作流 schema 获取下一个阶段的名称。
+
+        Args:
+            schema (Union[dict, WorkflowDefinition]): 工作流 schema 字典或 WorkflowDefinition 对象。
+            current_phase (str): 当前阶段名称。
+
+        Returns:
+            Optional[str]: 下一个阶段名称，如果已是最后一个阶段则返回 None。
+        """
+        # --- 修改点：使用改进后的 get_phase_order ---
+        try:
+            order = self.get_phase_order(schema) # 这个方法现在可以处理对象或字典了
+        except TypeError as e:
+            print(f"⚠️  [get_next_phase] Error in get_phase_order: {e}")
+            return None # 或抛出异常
+        # --- 修改点结束 ---
+        
         if current_phase not in order:
-            return schema["phases"][0]["name"] if schema["phases"] else None
+            # --- 修改点：增强兼容性，处理 schema 对象或字典以获取第一个阶段 ---
+            # return schema["phases"][0]["name"] if schema["phases"] else None # 旧的
+            try:
+                if hasattr(schema, 'phases') and schema.phases: # 新的，处理对象
+                    first_phase = schema.phases[0]
+                    return first_phase.name if hasattr(first_phase, 'name') else first_phase["name"]
+                elif isinstance(schema, dict) and schema.get("phases"): # 新的，处理字典
+                    return schema["phases"][0]["name"]
+                else:
+                    return None # 如果 schema 为空或无效
+            except (IndexError, KeyError, AttributeError) as e:
+                print(f"⚠️  [get_next_phase] Error getting first phase: {e}")
+                return None
+            # --- 修改点结束 ---
+
         current_idx = order[current_phase]
-        if current_idx + 1 < len(schema["phases"]):
-            return schema["phases"][current_idx + 1]["name"]
-        return None
+        # --- 修改点：增强兼容性，处理 schema 对象或字典以获取阶段列表 ---
+        # if current_idx + 1 < len(schema["phases"]): # 旧的
+        try:
+            phases_list = schema.phases if hasattr(schema, 'phases') else schema.get("phases", []) # 新的
+        except AttributeError:
+            print(f"⚠️  [get_next_phase] Schema object missing 'phases' attribute.")
+            return None
+        # --- 修改点结束 ---
+        if current_idx + 1 < len(phases_list):
+            # --- 修改点：增强兼容性，处理阶段对象或字典以获取名称 ---
+            # return schema["phases"][current_idx + 1]["name"] # 旧的
+            try:
+                next_phase = phases_list[current_idx + 1] # 新的
+                return next_phase.name if hasattr(next_phase, 'name') else next_phase["name"]
+            except (IndexError, KeyError, AttributeError) as e:
+                print(f"⚠️  [get_next_phase] Error getting next phase name: {e}")
+                return None
+            # --- 修改点结束 ---
+        
+        return None  # 已到最后
 
     def start_workflow_instance(self, workflow_definition: WorkflowDefinition, initial_context: Dict[str, Any], feature_id: str) -> str:
         """

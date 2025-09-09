@@ -147,33 +147,49 @@ class ContextManager(IContextManager):
         # --- 简单合并策略 ---
         # 按顺序遍历所有 ProvidedContext
         for pc in provided_contexts:
+            # 1. 安全检查：确保 pc.content 是一个字典
             context_content: Dict[str, Any] = pc.content
             if not isinstance(context_content, dict):
                 print(f"⚠️  ContextManager._merge_contexts: Provided context from '{pc.provider_name}' is not a dict, skipping.")
                 continue
 
-            # 将 content 字典的内容合并到最终上下文中
-            # 如果有同名键，后面的会覆盖前面的
+            # 2. 安全合并：遍历 content 字典的键值对
+            #    使用 .items() 遍历，而不是直接 update(dict) (虽然 update 本身也安全)
+            #    这样做更明确，并且可以在循环体内添加更复杂的逻辑（如果需要）
             # print(f"[DEBUG] ContextManager._merge_contexts: Merging context from '{pc.provider_name}' (keys: {list(context_content.keys())})")
-            merged_context.update(context_content)
-            
-            # 可选：将元数据也加入最终上下文，供调试或高级用法
+            for key, value in context_content.items():
+                # --- 可选：在这里添加更复杂的合并逻辑 ---
+                # 例如：
+                # - 如果 key 是 'core_files' 且 value 是 dict，则进行深度合并
+                # - 根据 key 或 provider_name 设置合并优先级
+                # - 对于列表类型的 value，可以选择追加而不是覆盖
+                # if key == "core_files" and isinstance(value, dict):
+                #     # 深度合并 core_files
+                #     if key in merged_context and isinstance(merged_context[key], dict):
+                #         merged_context[key].update(value)
+                #     else:
+                #         merged_context[key] = value
+                # else:
+                #     # 默认：简单覆盖
+                #     merged_context[key] = value
+                # --- 可选逻辑结束 ---
+                
+                # 默认策略：简单覆盖，后来者优先
+                merged_context[key] = value
+            # --- 安全合并结束 ---
+
+            # 3. (可选) 将元数据也加入最终上下文，供调试或高级用法
+            #    为了避免键冲突，可以使用命名空间
             # merged_context[f"_meta_{pc.provider_name}"] = pc.meta
 
-        # --- 可扩展的合并策略 ---
-        # 未来可以实现更复杂的合并逻辑，例如：
-        # 1. 基于 ContextType 的合并：
-        #    - GUIDING 类型的信息可能具有高优先级。
-        #    - INFORMATIONAL 类型的信息可能需要结构化处理。
-        # 2. 基于 Provider 优先级的合并。
-        # 3. 基于 key 名称空间的合并 (e.g., `project_info.name`, `core_files.src/main.py.snippet`)。
-        # 4. 使用特定的合并函数处理特定 key (例如，合并列表而不是覆盖)。
 
         # --- 添加请求本身的信息 ---
         # 将请求中的一些关键信息也加入最终上下文，供模板使用
-        merged_context["feature_id"] = request.feature_id
+        merged_context["feature_id"] = request.workflow_instance_id
         merged_context["phase_name"] = request.phase_name
         merged_context["task_description"] = request.task_description
+        merged_context["previous_outputs"] = request.previous_outputs
+        merged_context["user_inputs"] = request.user_inputs
         # previous_outputs 可能很大，可以选择性地加入或处理
         # merged_context["previous_outputs_summary"] = {k: type(v).__name__ for k, v in request.previous_outputs.items()}
         
@@ -188,20 +204,3 @@ class ContextManager(IContextManager):
     #     raise NotImplementedError("get_context_by_pipeline is not yet implemented.")
     # --- Future Extension End ---
 
-# --- 为了兼容旧代码或提供便捷访问，可以保留模块级函数 (可选) ---
-# def get_context(request: ContextRequest) -> Dict[str, Any]:
-#     """
-#     (模块级函数) 便捷方法：使用默认配置的 ContextManager 获取上下文。
-#     """
-#     # 注意：这种方式需要确保在调用时，所需的 Providers (如 ProjectInfoProvider, CoreFilesProvider)
-#     # 已经被正确地导入和实例化并注册到这个默认的 manager 实例中。
-#     # 这通常在库的初始化或应用的启动脚本中完成。
-#     # 一个更稳健的方式是在需要时显式创建和配置 ContextManager 实例。
-#     
-#     # 示例 (需要根据实际 Provider 实现调整):
-#     # from .providers import ProjectInfoProvider, CoreFilesProvider
-#     # manager = ContextManager()
-#     # manager.register_provider(ProjectInfoProvider())
-#     # manager.register_provider(CoreFilesProvider())
-#     # return manager.get_context(request)
-#     raise NotImplementedError("Use ContextManager instance method get_context instead.")

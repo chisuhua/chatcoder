@@ -133,19 +133,24 @@ class ProjectInfoProvider(IContextProvider):
             project_language = "cpp"
         context_data["project_language"] = project_language
 
-        # 5. 确定框架 (如果适用)
+
+        final_project_type_for_framework = context_data.get("project_type")
+        if not final_project_type_for_framework or final_project_type_for_framework == "unknown":
+            final_project_type_for_framework = detected_type
+
         framework = "unknown"
-        if detected_type == "python-django":
+        if "django" in final_project_type_for_framework.lower():
             framework = "Django"
-        elif detected_type == "python-fastapi":
+        elif "fastapi" in final_project_type_for_framework.lower():
             framework = "FastAPI"
+
         context_data["framework"] = framework
 
         provided_context = ProvidedContext(
             content=context_data,
             context_type=ContextType.GUIDING, # 项目信息通常是指导性的
             provider_name=self.name,
-            meta={"source": "context_file_and_detection"}
+            metadata={"source": "context_file_and_detection"}
         )
         
         return [provided_context]
@@ -231,7 +236,7 @@ class CoreFilesProvider(IContextProvider):
             content={"core_files": core_files_data},
             context_type=ContextType.INFORMATIONAL, # 核心文件是信息性的
             provider_name=self.name,
-            meta={
+            metadata={
                 "source": "file_scanning",
                 "patterns_used": core_patterns,
                 "files_scanned": len(core_files_data)

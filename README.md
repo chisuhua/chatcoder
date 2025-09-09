@@ -79,3 +79,11 @@ chatcoder/
 │       ├── step-test.md       ← 支持 {{ test_runner }} 条件渲染
 │       └── step-summary.md
 └── utils/console.py       ← 提供 console 输出
+
+
+## ChatContext
+
+接口与模型定义: 这些文件共同定义了 chatcontext 库的核心契约：
+models.py 定义了数据如何在组件间流动 (ContextRequest, ProvidedContext) 以及上下文的分类 (ContextType)。
+provider.py 定义了 IContextProvider 接口，任何具体的上下文来源（如文件扫描器、RAG 检索器、LLM 摘要器）都需要实现它。
+manager.py 定义了 IContextManager 接口，它是外部（如 chatcoder 或 chatflow）获取最终上下文的入口，并负责协调和整合来自不同 Provider 的 ProvidedContext。
