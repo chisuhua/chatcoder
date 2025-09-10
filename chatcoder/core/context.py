@@ -83,12 +83,6 @@ def generate_context_snapshot(phase: Optional[str] = None) -> Dict[str, Any]:
     [Minimal Backward Compatibility] 生成极简的上下文快照。
     [注意] 复杂的上下文生成功能已由 chatcontext 库提供。
     此函数仅作为 chatcontext 不可用时的极简后备。
-
-    Args:
-        phase (Optional[str]): 当前任务的阶段 (保留参数，但不再用于逻辑)。
-
-    Returns:
-        Dict[str, Any]: 包含极简上下文信息的字典。
     """
     try:
         # 1. 加载用户定义的上下文

@@ -29,6 +29,10 @@ class ContextRequest:
     phase_name: str
     task_description: str
 
+    project_type: Optional[str] = None
+    project_name: Optional[str] = None
+    project_language: Optional[str] = None
+
     # 上下文依赖
     previous_outputs: Dict[str, Any] = field(default_factory=dict) # 来自前序阶段/任务的输出
     user_inputs: Dict[str, Any] = field(default_factory=dict)      # 用户显式提供的信息

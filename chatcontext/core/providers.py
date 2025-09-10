@@ -29,28 +29,6 @@ def _read_file_safely(file_path: Path, max_size_mb: int = 1) -> Optional[str]:
         print(f"⚠️  Error reading file {file_path}: {e}")
         return None
 
-def _detect_project_type(project_root: Path = Path(".")) -> str:
-    """简化版项目类型探测。"""
-    rules = {
-        "python-django": [project_root / "manage.py"],
-        "python-fastapi": [project_root / "main.py"],
-        "python": [project_root / "requirements.txt", project_root / "setup.py", project_root / "pyproject.toml"],
-        "cpp-bazel": [project_root / "WORKSPACE"],
-        "cpp": [project_root / "CMakeLists.txt"],
-    }
-    
-    for project_type, indicators in rules.items():
-        if any(indicator.exists() for indicator in indicators):
-            return project_type
-            
-    # Fallback check for any .py or .cpp files
-    if any(project_root.glob("**/*.py")):
-        return "python"
-    if any(project_root.glob("**/*.cpp")) or any(project_root.glob("**/*.cc")):
-        return "cpp"
-        
-    return "unknown"
-
 def _load_yaml_safely(yaml_path: Path) -> Dict[str, Any]:
     """安全地加载 YAML 文件。"""
     import yaml
@@ -65,7 +43,10 @@ def _load_yaml_safely(yaml_path: Path) -> Dict[str, Any]:
 
 # --- 默认配置 ---
 DEFAULT_CONTEXT = {
+    "project_name": "unknown",
     "project_language": "unknown",
+    "project_type": "unknown",
+    "framework": "unknown",
     "test_runner": "unknown",
     "format_tool": "unknown",
     "project_description": "未提供项目描述"
@@ -97,7 +78,7 @@ CONFIG_FILE = CONTEXT_DIR / "config.yaml"
 class ProjectInfoProvider(IContextProvider):
     """
     提供项目基本信息的上下文提供者。
-    包括从 context.yaml 加载的用户定义信息和探测到的项目类型。
+    完全依赖从 ContextRequest 传入的 project_type。
     """
 
     @property
@@ -110,41 +91,20 @@ class ProjectInfoProvider(IContextProvider):
         根据请求生成项目基本信息上下文。
         """
         context_data: Dict[str, Any] = DEFAULT_CONTEXT.copy()
+
+        if request.project_name:
+            context_data["project_name"] = request.project_name
+        if request.project_language:
+            context_data["project_language"] = request.project_language
+        if request.project_type:
+            context_data["project_type"] = request.project_type
         
-        # 1. 从 .chatcoder/context.yaml 加载用户定义的上下文
-        user_context = _load_yaml_safely(CONTEXT_FILE)
-        context_data.update({k: v for k, v in user_context.items() if v}) # 过滤空值
-
-        # 2. 探测项目类型
-        detected_type = _detect_project_type()
-        context_data["detected_type"] = detected_type
-
-        # 3. (可选) 从 .chatcoder/config.yaml 加载额外配置
-        config_data = _load_yaml_safely(CONFIG_FILE)
-        if config_data:
-            # 例如，config.yaml 中可能有 project_name
-            context_data["project_name"] = config_data.get("project_name", context_data.get("project_name", "Unknown Project"))
-
-        # 4. 确定项目语言 (基于类型或文件)
-        project_language = "unknown"
-        if "python" in detected_type:
-            project_language = "python"
-        elif "cpp" in detected_type:
-            project_language = "cpp"
-        context_data["project_language"] = project_language
-
-
-        final_project_type_for_framework = context_data.get("project_type")
-        if not final_project_type_for_framework or final_project_type_for_framework == "unknown":
-            final_project_type_for_framework = detected_type
-
-        framework = "unknown"
-        if "django" in final_project_type_for_framework.lower():
-            framework = "Django"
-        elif "fastapi" in final_project_type_for_framework.lower():
-            framework = "FastAPI"
-
-        context_data["framework"] = framework
+        if request.project_type:
+            pt_lower = request.project_type.lower()
+        if "django" in pt_lower:
+            context_data["framework"] = "Django"
+        elif "fastapi" in pt_lower:
+            context_data["framework"] = "FastAPI"
 
         provided_context = ProvidedContext(
             content=context_data,
@@ -175,7 +135,7 @@ class CoreFilesProvider(IContextProvider):
         
         # 1. 确定项目类型 (可以复用探测逻辑或从 ProjectInfoProvider 获取的结果)
         #    为了简化，我们在这里重新探测
-        project_type = _detect_project_type()
+        project_type = request.project_type or "unknown"
         
         # 2. 确定要扫描的文件模式
         core_patterns = None

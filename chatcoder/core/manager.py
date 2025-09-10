@@ -103,30 +103,11 @@ class AIInteractionManager:
     ) -> str:
         """
         渲染指定的提示词模板。
-
-        Args:
-            template (str): 模板名称或路径（支持别名）。
-            description (str): 任务描述。
-            previous_task (Optional[Dict[str, Any]]): 前置任务状态。
-            **kwargs: 其他传递给模板的上下文变量。如果包含 'phase'，将用于动态上下文。
-
-        Returns:
-            str: 渲染后的提示词内容。
-
-        Raises:
-            FileNotFoundError: 如果模板文件未找到。
-            jinja2.TemplateError: 如果模板渲染过程中发生错误。
-            RuntimeError: 如果需要 chatcontext 但其不可用。
         """
 
         # 1. 解析模板路径
         resolved_rel_path = self._resolve_template_path(template)
         template_file = TEMPLATES_DIR / resolved_rel_path
-
-        # --- 调试信息 ---
-        # print(f"🔍 [DEBUG] resolved_rel_path = {resolved_rel_path}")
-        # print(f"📁 [DEBUG] template_file = {template_file}")
-        # print(f"📌 [DEBUG] TEMPLATES_DIR = {TEMPLATES_DIR}")
 
         if not template_file.exists():
             # 尝试提供更友好的错误信息
@@ -159,13 +140,11 @@ class AIInteractionManager:
             jinja_template = env.get_template(rel_path_forward)
 
             # 4. 生成核心上下文
-            # --- 修改点：使用 chatcontext 或报错 ---
             context: Dict[str, Any] = {}
             current_phase = kwargs.get('phase')
 
             if CHATCONTEXT_AVAILABLE:
                 try:
-                    # --- 新逻辑：使用 chatcontext ---
                     # 1. 创建 ContextManager 和 Providers
                     cm = ContextManager()
                     cm.register_provider(ProjectInfoProvider())
@@ -187,12 +166,21 @@ class AIInteractionManager:
                         workflow_instance_id = "temp_workflow_instance_id_for_prompt"
                         feature_id = workflow_instance_id # 保持一致
 
+                    chatcoder_context_snapshot = legacy_generate_context_snapshot() # 调用旧函数获取完整快照
+                    project_info_from_snapshot = {
+                        "project_name": chatcoder_context_snapshot.get("project_name", "Unknown Project"),
+                        "project_language": chatcoder_context_snapshot.get("project_language", "unknown"),
+                        "project_type": chatcoder_context_snapshot.get("project_type", "unknown"),
+                    }
                     # 3. 创建请求对象
                     context_request = ContextRequest( # <-- 修正后的参数名
                         workflow_instance_id=workflow_instance_id, # <-- 使用正确的参数名
                         phase_name=current_phase or template,       # <-- 其他参数保持不变
                         task_description=description,
                         previous_outputs=previous_task or {},
+                        project_name=project_info_from_snapshot["project_name"],
+                        project_language=project_info_from_snapshot["project_language"],
+                        project_type=project_info_from_snapshot["project_type"],
                         # user_inputs=... # 从 kwargs 中提取
                     )
                     # print(f"✅ [DEBUG] Constructed ContextRequest: {context_request}")
@@ -318,10 +306,8 @@ class AIInteractionManager:
             console.print("[dim]" + "-" * 60 + "[/dim]")
 
             # 3. 生成上下文快照 (修改点：尝试传递 phase 进行调试)
-            # 为了调试，我们可以假设一个 phase，或者从 extra_context 获取
             debug_phase = extra_context.get('phase', 'debug_phase') # 默认值
             
-            # --- 修改点：调试时也使用 chatcontext 或报错 ---
             context: Dict[str, Any] = {}
             if CHATCONTEXT_AVAILABLE:
                 try:
@@ -349,7 +335,6 @@ class AIInteractionManager:
                     "Debug rendering with context requires the 'chatcontext' library, "
                     "but it is not installed or not found. "
                 )
-            # --- 修改点结束 ---
             
             context.update(extra_context)
             context.update({
