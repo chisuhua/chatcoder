@@ -19,7 +19,7 @@ def load_template(template_type: str, lang: str) -> str:
     """
     加载指定类型的模板（config / context）
     """
-    template_path = TEMPLATE_DIR /  template_type / f"{lang}.yaml"
+    template_path = TEMPLATE_DIR / template_type / f"{lang}.yaml"
     if not template_path.exists():
         raise FileNotFoundError(f"未找到模板: {template_path}")
     return template_path.read_text(encoding="utf-8")
@@ -150,7 +150,7 @@ def validate_config():
     """
     验证 config.yaml 文件的合法性
     """
-    click.echo(f"🔍 正在验证 {CONFIG_FILE}...")
+    click.echo(f"🔍 正在验证 {CONFIG_FILE}... ")
 
     # 1. 检查文件是否存在
     if not CONFIG_FILE.exists():

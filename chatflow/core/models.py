@@ -16,6 +16,7 @@ class WorkflowInstanceStatus(Enum):
     CREATED = "created"
     RUNNING = "running"
     PAUSED = "paused"
+    CONFIRMED = "confirmed"
     COMPLETED = "completed"
     FAILED = "failed"
 

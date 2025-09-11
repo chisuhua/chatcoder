@@ -13,6 +13,17 @@ class IContextManager:
     """
     抽象基类，用于定义上下文管理器的接口。
     """
+    def __init__(self):
+        self._providers: List[IContextProvider] = []
+
+    def register_provider(self, provider: IContextProvider) -> None:
+        """
+        注册一个上下文提供者。
+
+        Args:
+            provider (IContextProvider): 要注册的提供者实例。
+        """
+        self._providers.append(provider)
 
     def get_context(self, request: ContextRequest) -> Dict[str, Any]:
         """

@@ -7,12 +7,21 @@ ChatFlow 核心接口 - 工作流引擎 (IWorkflowEngine)
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional, List
 # 假设核心数据结构定义在 models.py 中
+from .state import IWorkflowStateStore
 from .models import WorkflowInstanceState, WorkflowInstanceStatus, WorkflowDefinition
 
 class IWorkflowEngine(ABC):
     """
     抽象基类，定义工作流引擎的接口。
     """
+    def __init__(self, state_store: IWorkflowStateStore):
+        """
+        初始化工作流引擎。
+
+        Args:
+            state_store (IWorkflowStateStore): 用于持久化和加载实例状态的存储接口实现。
+        """
+        self.state_store = state_store
 
     @abstractmethod
     def load_workflow_schema(self, name: str = "default") -> dict:
@@ -88,6 +97,17 @@ class IWorkflowEngine(ABC):
         Returns:
             WorkflowInstanceState: 更新后的工作流实例状态。
         """
+        pass
+
+    
+    @abstractmethod
+    def get_current_task_id_for_feature(self, feature_id: str) -> Optional[str]:
+        """根据 feature_id 获取当前活动（非完成）任务的 instance_id。"""
+        pass
+
+    @abstractmethod
+    def list_all_feature_ids(self) -> List[str]:
+        """获取所有已知的 feature_id 列表。"""
         pass
 
     # 可以在这里添加更多抽象方法，例如 determine_next_phase

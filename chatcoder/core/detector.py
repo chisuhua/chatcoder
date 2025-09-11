@@ -1,5 +1,7 @@
 # chatcoder/core/detector.py
-"""项目类型探测器（仅 Python / C++）"""
+"""
+项目类型探测器（仅 Python / C++）
+"""
 
 from pathlib import Path
 from typing import List, Dict, Optional
@@ -38,7 +40,7 @@ PROJECT_RULES = {
 def detect_project_type(root: Path = Path(".")) -> str:
     """
     探测项目类型，返回如 'python-django', 'cpp', 'cpp-bazel'
-    优先级：用户配置 > 框架 > 语言
+    优先级：用户配置  > 框架  > 语言
     """
     # 1. 尝试从配置加载（未来扩展）
     # config = _load_config(root)
@@ -59,7 +61,9 @@ def detect_project_type(root: Path = Path(".")) -> str:
 
 # ==================== 私有实现 ====================
 def _matches_rules(root: Path, rules: List[Dict]) -> bool:
-    """检查是否匹配规则组：所有 required 规则必须匹配，且至少一个规则匹配。"""
+    """
+    检查是否匹配规则组：所有 required 规则必须匹配，且至少一个规则匹配。
+    """
     at_least_one_matched = False
     for rule in rules:
         if _rule_matches(root, rule):
@@ -76,7 +80,9 @@ def _matches_rules(root: Path, rules: List[Dict]) -> bool:
     return at_least_one_matched # 只有当至少一个规则匹配时才返回 True
 
 def _rule_matches(root: Path, rule: Dict) -> bool:
-    """检查单个规则是否匹配"""
+    """
+    检查单个规则是否匹配
+    """
     file_path = root / rule["file"]
     
     if not file_path.exists():

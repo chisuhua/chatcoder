@@ -37,6 +37,10 @@ class ContextRequest:
     previous_outputs: Dict[str, Any] = field(default_factory=dict) # 来自前序阶段/任务的输出
     user_inputs: Dict[str, Any] = field(default_factory=dict)      # 用户显式提供的信息
 
+    # --- 调试/预览标志 ---
+    is_preview: bool = False       # 是否为预览模式
+    is_for_current_task: bool = False # 是否为当前活动任务生成上下文
+
     # 要求
     required_types: List[ContextType] = field(default_factory=list) # 请求的上下文类型
     # 可以扩展：例如，指定需要哪些特定文件的上下文，或者上下文的详细程度等
