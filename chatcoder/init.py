@@ -1,24 +1,28 @@
-# chatcoder/core/init.py
+# chatcoder/init.py
+# (从 chatcoder/core/init.py 移动而来)
 """
-项目初始化模块
+项目初始化模块 (CLI 层交互与渲染)
+此模块负责通过 CLI 交互收集信息并渲染配置文件内容。
+文件的实际创建操作由 CLI 层 (chatcoder/cli.py) 执行。
 """
+
 from pathlib import Path
 import jinja2
 import click
 import yaml
 
 # ------------------------------
-# 常量定义
+# 常量定义 (相对于新位置)
 # ------------------------------
 
-TEMPLATE_DIR = Path(__file__).parent.parent / "templates" / "ai-prompts" 
-CONTEXT_FILE = Path(".chatcoder") / "context.yaml"
-CONFIG_FILE = Path(".chatcoder") / "config.yaml"  # 新增
+# 注意：TEMPLATE_DIR 现在相对于 chatcoder/init.py
+TEMPLATE_DIR = Path(__file__).parent / "templates" / "ai-prompts" 
+# CONTEXT_FILE 和 CONFIG_FILE 不再在此模块中直接使用，因为文件操作移至 cli.py
+# CONTEXT_FILE = Path(".chatcoder") / "context.yaml"
+# CONFIG_FILE = Path(".chatcoder") / "config.yaml"
 
 def load_template(template_type: str, lang: str) -> str:
-    """
-    加载指定类型的模板（config / context）
-    """
+    """加载指定类型的模板（config / context）"""
     template_path = TEMPLATE_DIR / template_type / f"{lang}.yaml"
     if not template_path.exists():
         raise FileNotFoundError(f"未找到模板: {template_path}")
@@ -31,13 +35,12 @@ def render_template(template_type: str, lang: str, **values) -> str:
     env = jinja2.Environment(loader=jinja2.DictLoader({"t": template_str}))
     return env.get_template("t").render(**values)
 
-def init_project():
+# --- 修改点：init_project 不再执行文件 I/O ---
+def init_project() -> tuple[str, str]:
     """
-    交互式初始化项目
+    交互式初始化项目，返回渲染好的 config 和 context 内容字符串。
+    文件创建操作由调用者 (cli.py) 负责。
     """
-    state_dir = Path(".chatcoder")
-    state_dir.mkdir(exist_ok=True)
-
     # 交互输入
     project_name = Path(".").resolve().name
     lang = click.prompt(
@@ -59,9 +62,11 @@ def init_project():
     else:
         ui_library = ""
 
-    # 渲染模板
+    # 渲染模板内容
+    config_content = ""
+    context_content = ""
     try:
-        config_rendered = render_template(
+        config_content = render_template(
             template_type="config",
             lang=lang,
             project_name=project_name,
@@ -70,29 +75,11 @@ def init_project():
             ui_library=ui_library
         )
     except Exception as e:
-        click.echo(f"❌ 模板渲染失败: {e}")
+        click.echo(f"❌ config 模板渲染失败: {e}")
         raise
 
-    # 写入 config.yaml
-    if CONFIG_FILE.exists():
-        if not click.confirm(f"{CONFIG_FILE} 已存在。是否覆盖？", default=False):
-            click.echo("跳过 config.yaml 生成。")
-        else:
-            CONFIG_FILE.write_text(config_rendered, encoding="utf-8")
-            click.echo(f"✅ 已更新: {CONFIG_FILE}")
-    else:
-        CONFIG_FILE.write_text(config_rendered, encoding="utf-8")
-        click.echo(f"✅ 已生成: {CONFIG_FILE}")
-
-    # 检查是否已存在
-    if CONTEXT_FILE.exists():
-        if not click.confirm(f"{CONTEXT_FILE} 已存在。是否覆盖？", default=False):
-            click.echo("初始化已取消。")
-            return
-
-    # 渲染 context.yaml
     try:
-        context_rendered = render_template(
+        context_content = render_template(
             template_type="context",
             lang=lang,
             project_name=project_name,
@@ -104,63 +91,13 @@ def init_project():
         click.echo(f"❌ context 模板渲染失败: {e}")
         raise
     
+    return config_content, context_content
+
+# --- 保留验证函数 ---
+def validate_config_content(content: str):
+    """验证配置内容字符串的合法性"""
+    click.echo(f"🔍 正在验证配置内容... ")
     try:
-        CONTEXT_FILE.write_text(context_rendered, encoding="utf-8")
-        click.echo(f"✅ 已生成: {CONTEXT_FILE}")
-        click.echo(f"🔧 项目语言: {lang}")
-        click.echo("📌 可使用 `chatcoder prompt` 开始第一个任务")
-    except Exception as e:
-        click.echo(f"❌ 写入文件失败: {e}")
-        raise
-
-
-# ------------------------------
-# 附加功能（可选，未来扩展）
-# ------------------------------
-
-def list_available_templates() -> list:
-    """
-    列出所有可用的语言模板
-
-    Returns:
-        语言标识列表
-    """
-    if not TEMPLATE_DIR.exists():
-        return []
-    return [f.stem for f in TEMPLATE_DIR.glob("*.yaml")]
-
-
-def validate_context_file() -> bool:
-    """
-    验证 context.yaml 是否存在且语法正确
-
-    Returns:
-        是否有效
-    """
-    if not CONTEXT_FILE.exists():
-        return False
-    try:
-        with open(CONTEXT_FILE, 'r', encoding='utf-8') as f:
-            yaml.safe_load(f)
-        return True
-    except Exception:
-        return False
-
-def validate_config():
-    """
-    验证 config.yaml 文件的合法性
-    """
-    click.echo(f"🔍 正在验证 {CONFIG_FILE}... ")
-
-    # 1. 检查文件是否存在
-    if not CONFIG_FILE.exists():
-        click.echo(click.style("❌ 错误：配置文件不存在。", fg="red"))
-        click.echo(f"   请先运行 `chatcoder init` 初始化项目。")
-        raise click.Abort()
-
-    # 2. 检查 YAML 语法
-    try:
-        content = CONFIG_FILE.read_text(encoding="utf-8")
         data = yaml.safe_load(content)
     except Exception as e:
         click.echo(click.style("❌ YAML 语法错误！", fg="red"))
@@ -168,14 +105,13 @@ def validate_config():
         raise click.Abort()
 
     if data is None:
-        click.echo(click.style("⚠️ 警告：config.yaml 为空文件。", fg="yellow"))
+        click.echo(click.style("⚠️ 警告：配置内容为空。", fg="yellow"))
         return
 
     if not isinstance(data, dict):
-        click.echo(click.style("❌ 错误：config.yaml 必须是一个 YAML 对象。", fg="red"))
+        click.echo(click.style("❌ 错误：配置内容必须是一个 YAML 对象。", fg="red"))
         raise click.Abort()
 
-    # 3. 验证 core_patterns（如果存在）
     if "core_patterns" in data:
         if not isinstance(data["core_patterns"], list):
             click.echo(click.style("❌ 错误：core_patterns 必须是一个列表。", fg="red"))
@@ -184,7 +120,6 @@ def validate_config():
         else:
             click.echo(click.style(f"✅ core_patterns: 找到 {len(data['core_patterns'])} 个模式", fg="green"))
 
-    # 4. 验证 exclude_patterns（可选）
     if "exclude_patterns" in data:
         if not isinstance(data["exclude_patterns"], list):
             click.echo(click.style("❌ 错误：exclude_patterns 必须是一个列表。", fg="red"))
@@ -193,7 +128,6 @@ def validate_config():
         else:
             click.echo(click.style(f"✅ exclude_patterns: 找到 {len(data['exclude_patterns'])} 个排除模式", fg="green"))
 
-    # 5. 验证 project 字段（可选）
     if "project" in data:
         if isinstance(data["project"], dict):
             lang = data["project"].get("language")
@@ -202,5 +136,13 @@ def validate_config():
         else:
             click.echo(click.style("⚠️ 警告：project 字段应为对象", fg="yellow"))
 
-    # ✅ 全部通过
-    click.echo(click.style("🎉 配置文件验证通过！", fg="green"))
+    click.echo(click.style("🎉 配置内容验证通过！", fg="green"))
+
+# --- 保留其他辅助函数 ---
+def list_available_templates() -> list:
+    """列出所有可用的语言模板"""
+    if not TEMPLATE_DIR.exists():
+        return []
+    return [f.stem for f in TEMPLATE_DIR.glob("*.yaml")]
+
+# validate_context_file 不再需要，因为内容由 cli.py 传递

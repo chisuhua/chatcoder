@@ -12,7 +12,7 @@ from typing import Dict, Any, Optional, List
 
 # --- 导入 chatflow 库 (强依赖) ---
 try:
-    from chatflow.core.workflow_engine import WorkflowEngine as ChatFlowEngine
+    from chatflow.core.workflow_engine import WorkflowEngine as WorkFlowEngine
     from chatflow.core.file_state_store import FileWorkflowStateStore
     from chatflow.core.models import WorkflowDefinition, WorkflowInstanceState, WorkflowInstanceStatus
     CHATFLOW_AVAILABLE = True
@@ -39,10 +39,8 @@ except ImportError as e:
 
 # --- 导入 ChatCoder 内部模块 ---
 from .manager import AIInteractionManager
-from .init import init_project, validate_config
-from .context import generate_project_context # 精简后备
+from .context import generate_project_context_from_data # 精简后备
 from .detector import detect_project_type
-# 简化后的 TaskOrchestrator，仅用于 ID 生成
 from .orchestrator import TaskOrchestrator
 
 TASKS_DIR = Path.cwd().resolve() / ".chatcoder" / "tasks"
@@ -52,44 +50,32 @@ class ChatCoder:
     ChatCoder 核心服务类。
     """
 
-    def __init__(self):
+    def __init__(self, config_data: Dict[str, Any], context_data: Dict[str, Any]):
         """
         初始化 ChatCoder 服务。
         强制依赖 chatflow 和 chatcontext。
         """
-        self.state_store = FileWorkflowStateStore(base_path=str(TASKS_DIR))
-        self.workflow_engine = ChatFlowEngine(state_store=self.state_store)
+        self.config_data = config_data
+        self.context_data = context_data
+        # --- chatflow 初始化 ---
+        self.state_store = FileWorkflowStateStore(base_dir=TASKS_DIR)
+        self.workflow_engine = WorkFlowEngine(state_store=self.state_store)
+        TASKS_DIR.mkdir(parents=True, exist_ok=True)
 
-        Path(TASKS_DIR).mkdir(parents=True, exist_ok=True)
-
+        # --- chatcontext 初始化 ---
         self.context_manager = ContextManager()
+
+        # --- ChatCoder 内部模块 ---
         self.ai_manager = AIInteractionManager()
-        # 仅用于 ID 生成
         self.task_orchestrator = TaskOrchestrator()
 
-    # --- 项目初始化 ---
-    def initialize_project(self, interactive: bool = True, **config_kwargs) -> bool:
-        try:
-            if interactive:
-                 init_project()
-            else:
-                raise NotImplementedError("Non-interactive init not yet implemented.")
-            return True
-        except Exception as e:
-            raise RuntimeError(f"Project initialization failed: {e}") from e
+        # --- 预生成静态项目上下文 (后备) ---
+        # 如果 chatcontext 不可用，可以使用这个
+        self._static_project_context = generate_project_context_from_data(
+            config_data=self.config_data,
+            context_data=self.context_data
+        )
 
-    def is_project_initialized(self) -> bool:
-        config_file = Path(".chatcoder") / "config.yaml"
-        context_file = Path(".chatcoder") / "context.yaml"
-        return config_file.exists() and context_file.exists()
-
-    def validate_configuration(self) -> Dict[str, Any]:
-        try:
-            is_valid = self.is_project_initialized()
-            errors = [] if is_valid else ["Config or context file missing."]
-            return {"is_valid": is_valid, "errors": errors}
-        except Exception as e:
-             return {"is_valid": False, "errors": [str(e)]}
 
     # --- 特性管理 ---
     def start_new_feature(self, description: str, workflow_name: str = "default") -> Dict[str, str]:
@@ -257,10 +243,35 @@ class ChatCoder:
             return []
         return [f.stem for f in workflows_dir.glob("*.yaml")]
 
-    def get_project_context_snapshot(self) -> Dict[str, Any]:
-        """获取项目静态上下文（后备）"""
-        try:
-            # 使用精简后的 generate_project_context
-            return generate_project_context()
-        except Exception as e:
-             raise RuntimeError(f"Failed to get project context snapshot: {e}") from e
+    # Placeholder for apply_task
+    def apply_task(self, feature_id: str, ai_response: str) -> bool:
+        """
+        [Placeholder] Apply an AI response to the current task of a feature.
+
+        This method would typically:
+        1. Find the current active task for the given feature_id.
+        2. Parse the ai_response content (e.g., looking for file changes).
+        3. Apply the changes to the local file system.
+        4. Update the task state (e.g., mark as 'applied' or 'needs_review').
+
+        Args:
+            feature_id (str): The ID of the feature.
+            ai_response (str): The raw text response from the AI.
+
+        Returns:
+            bool: True if the application was successful, False otherwise.
+        """
+        # TODO: Implement the logic to apply the AI response.
+        # This is a placeholder implementation.
+        print(f"[PLACEHOLDER] Applying AI response to feature '{feature_id}'...")
+        print(f"[PLACEHOLDER] AI Response Preview (first 200 chars): {ai_response[:200]}...")
+        # Example steps (not implemented):
+        # 1. current_task = self._find_current_active_task(feature_id)
+        # 2. changeset = parse_ai_response_for_changes(ai_response)
+        # 3. for change in changeset.changes:
+        #       if change.operation == "create" or change.operation == "modify":
+        #           Path(change.file_path).write_text(change.new_content, encoding='utf-8')
+        # 4. self._update_task_status(current_task.instance_id, "applied") # Or use chatflow
+        # 5. return True
+        return True # Placeholder return
+

@@ -19,8 +19,8 @@ class TestChatCoder:
         mocks = chatcoder_service['mocks']
         temp_dir = chatcoder_service['temp_dir']
 
-        expected_base_path = str((temp_dir / ".chatcoder" / "tasks").resolve())
-        mocks['chatflow']['store_class'].assert_called_once_with(base_path=expected_base_path)
+        expected_base_path = (temp_dir / ".chatcoder" / "tasks").resolve()
+        mocks['chatflow']['store_class'].assert_called_once_with(base_dir=expected_base_path)
         expected_state_store_mock = mocks['chatflow']['store_instance']
         mocks['chatflow']['engine_class'].assert_called_once_with(state_store=expected_state_store_mock) # <-- 修改这里
 

@@ -16,7 +16,7 @@ from .state import IWorkflowStateStore
 from .models import WorkflowInstanceState, WorkflowInstanceStatus, WorkflowDefinition
 
 # --- 配置 ---
-PROJECT_ROOT = Path(__file__).parent.parent.parent.parent
+PROJECT_ROOT = Path(__file__).parent.parent.parent
 TEMPLATES_DIR = PROJECT_ROOT / "ai-prompts"
 
 def get_workflow_path() -> Path:
@@ -43,7 +43,7 @@ class WorkflowEngine(IWorkflowEngine):
         custom_path = self.get_workflow_path() / f"{name}.yaml"
         if custom_path.exists():
             return yaml.safe_load(custom_path.read_text(encoding="utf-8"))
-        raise ValueError(f"Workflows schema not found: {name}")
+        raise ValueError(f"Workflows schema not found: {custom_path}")
 
     def get_phase_order(self, schema) -> Dict[str, int]:
         """
@@ -363,3 +363,12 @@ class WorkflowEngine(IWorkflowEngine):
             "source": "standard_or_smart",
             "current_phase": current_phase
         }
+
+    def get_current_task_id_for_feature(self, feature_id: str) -> Optional[str]:
+        """根据 feature_id 获取当前活动（非完成）任务的 instance_id。"""
+        pass
+
+    def list_all_feature_ids(self) -> List[str]:
+        """获取所有已知的 feature_id 列表。"""
+        pass
+

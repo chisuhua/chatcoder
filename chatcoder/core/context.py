@@ -1,18 +1,15 @@
 # chatcoder/core/context.py
 """
-上下文管理模块：负责初始化项目、解析上下文 (精简版后备)
+上下文管理模块：负责解析和生成项目静态上下文 (精简版后备)
 [注意] 此模块现在主要作为 chatcontext 库不可用时的极简后备方案。
 核心的、动态的上下文生成功能已迁移至 chatcontext 库。
+此版本专注于从传入的 config_data 和 context_data 生成静态上下文。
 """
 
-from pathlib import Path
-import yaml
 from typing import Dict, Any, Optional, List
-from .detector import detect_project_type
+from .detector import detect_project_type # 如果探测逻辑仍需保留
 
-# 全局常量
-CONTEXT_FILE = Path(".chatcoder") / "context.yaml"
-CONFIG_FILE = Path(".chatcoder") / "config.yaml"
+# 默认上下文值
 DEFAULT_CONTEXT = {
     "project_language": "unknown",
     "test_runner": "unknown",
@@ -20,69 +17,45 @@ DEFAULT_CONTEXT = {
     "project_description": "未提供项目描述"
 }
 
-def parse_context_file() -> Dict[str, Any]:
+def generate_project_context_from_data(
+    config_data: Optional[Dict[str, Any]],
+    context_data: Optional[Dict[str, Any]]
+) -> Dict[str, Any]:
     """
-    解析 context.yaml 文件，返回字典。
-    """
-    if not CONTEXT_FILE.exists():
-        raise FileNotFoundError(f"上下文文件不存在: {CONTEXT_FILE}")
-    try:
-        with open(CONTEXT_FILE, 'r', encoding='utf-8') as f:
-            data = yaml.safe_load(f)
-            if data is None:
-                return {}
-            if not isinstance(data, dict):
-                raise ValueError(f"上下文文件必须是 YAML 对象，实际为: {type(data)}")
-            return data
-    except yaml.YAMLError as e:
-        raise RuntimeError(f"YAML 语法错误: {e}")
-    except Exception as e:
-        raise RuntimeError(f"解析上下文文件失败: {e}")
-
-def load_core_patterns_from_config() -> Optional[List[str]]:
-    """
-    从 config.yaml 中加载 core_patterns 配置
-    """
-    if not CONFIG_FILE.exists():
-        return None
-
-    try:
-        with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-            config = yaml.safe_load(f)
-            if not config:
-                return None
-            patterns = config.get("core_patterns")
-            if isinstance(patterns, list):
-                return patterns
-            elif patterns is not None:
-                 print(f"⚠️  {CONFIG_FILE} 中的 core_patterns 不是列表，已忽略。")
-            return None
-    except Exception as e:
-        print(f"⚠️ 读取 {CONFIG_FILE} 失败: {e}")
-        return None
-
-def generate_project_context() -> Dict[str, Any]:
-    """
-    [精简后备] 生成项目相关的静态上下文信息。
+    [精简后备] 根据传入的配置和上下文数据生成项目相关的静态上下文信息。
     [注意] 复杂的上下文生成功能已由 chatcontext 库提供。
-    此函数仅作为 chatcontext 不可用时的极简后备，主要读取静态配置。
+    此函数仅作为 chatcontext 不可用时的极简后备。
+
+    Args:
+        config_data (Optional[Dict[str, Any]]): 从 config.yaml 加载的配置数据。
+        context_data (Optional[Dict[str, Any]]): 从 context.yaml 加载的上下文数据。
+
+    Returns:
+        Dict[str, Any]: 包含项目静态信息的字典。
     """
     try:
-        # 1. 加载用户定义的上下文
-        user_context = parse_context_file()
-        # 过滤掉空值
-        non_empty_user_context = {k: v for k, v in user_context.items() if v}
-
-        # 2. 探测项目类型
-        project_type = detect_project_type()
-
-        # 3. 加载核心模式 (供 chatcontext 使用)
-        core_patterns = load_core_patterns_from_config()
-
-        # 4. 构建最终结果
+        # 1. 初始化结果字典
         result = DEFAULT_CONTEXT.copy()
-        result.update(non_empty_user_context) # 用户配置优先
-        result["project_type"] = project_type
+
+        # 2. 合并 context_data (用户在 context.yaml 中定义的)
+        if context_data and isinstance(context_data, dict):
+            # 过滤掉空值 (可选)
+            non_empty_context_data = {k: v for k, v in context_data.items() if v is not None}
+            result.update(non_empty_context_data) # context_data 优先级高于默认值
+
+        # 3. 从 config_data 中提取特定信息 (如 core_patterns)
+        core_patterns: Optional[List[str]] = None
+        if config_data and isinstance(config_data, dict):
+            cp = config_data.get("core_patterns")
+            if isinstance(cp, list):
+                core_patterns = cp
+            # 可以从 config_data 中提取其他需要的静态信息
+
+        # 4. (可选) 探测项目类型 (如果需要动态探测而非完全依赖配置)
+        # detected_project_type = detect_project_type()
+        # result["project_type"] = detected_project_type
+
+        # 5. 添加从配置中提取的信息
         if core_patterns:
             result["core_patterns"] = core_patterns
 
@@ -90,21 +63,8 @@ def generate_project_context() -> Dict[str, Any]:
 
     except Exception as e:
         # 安全降级：返回默认上下文
-        print(f"⚠️ 生成后备项目上下文时出错: {e}")
+        print(f"⚠️ 从数据生成后备项目上下文时出错: {e}")
         fallback = DEFAULT_CONTEXT.copy()
         fallback["project_type"] = "unknown"
         return fallback
 
-# --- 保留核心加载函数 ---
-def ensure_context_dir() -> Path:
-    """
-    确保 .chatcoder 目录存在，并返回路径。
-    """
-    CONTEXT_FILE.parent.mkdir(parents=True, exist_ok=True)
-    return CONTEXT_FILE.parent
-
-# --- 移除或注释掉不再需要的函数 ---
-# def write_context_file(...) -> None: ...
-# def get_context_value(...) -> Any: ...
-# def debug_print_context() -> None: ...
-# def generate_context_snapshot(...) -> Dict[str, Any]: ... (已重命名为 generate_project_context)
