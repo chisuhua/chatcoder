@@ -134,20 +134,27 @@ class WorkflowEngine(IWorkflowEngine):
         
         return None  # 已到最后
 
-    def start_workflow_instance(self, workflow_definition: WorkflowDefinition, initial_context: Dict[str, Any], feature_id: str) -> str:
+    def start_workflow_instance(self, workflow_schema: Dict[str, Any], initial_context: Dict[str, Any], feature_id: str) -> str:
         """
         启动一个新的工作流实例。
         """
         instance_id = f"wfi_{uuid.uuid4().hex[:12]}"
         now_iso = datetime.now().isoformat()
         
+        # 确保 schema 是字典格式，并获取名称和起始阶段
+        if not isinstance(workflow_schema, dict):
+             raise TypeError("workflow_schema must be a dictionary.")
+
+        workflow_name = workflow_schema.get("name", "unnamed_schema") # 从 schema 字典获取名称
+
         # 确定起始阶段 (通常是第一个阶段)
-        starting_phase = workflow_definition.phases[0].name if workflow_definition.phases else None
+        phases_list = workflow_schema.get("phases", [])
+        starting_phase = phases_list[0].get("name") if phases_list else None
 
         initial_state = WorkflowInstanceState(
             instance_id=instance_id,
             feature_id=feature_id,
-            workflow_name=workflow_definition.name,
+            workflow_name=workflow_name,
             current_phase=starting_phase,
             history=[],
             variables=initial_context, # 将初始上下文存为变量
@@ -364,11 +371,4 @@ class WorkflowEngine(IWorkflowEngine):
             "current_phase": current_phase
         }
 
-    def get_current_task_id_for_feature(self, feature_id: str) -> Optional[str]:
-        """根据 feature_id 获取当前活动（非完成）任务的 instance_id。"""
-        pass
-
-    def list_all_feature_ids(self) -> List[str]:
-        """获取所有已知的 feature_id 列表。"""
-        pass
 

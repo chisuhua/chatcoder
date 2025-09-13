@@ -220,7 +220,7 @@ def feature_start(ctx, description: str, workflow: str):
         console.print(f"\n💡 Suggested next command:")
         console.print(f"[dim]$[/dim] [cyan]chatcoder task prompt {feature_id}[/cyan]")
     except Exception as e:
-        error(f"Failed to start feature: {e}")
+        error(f"Cli Failed to start feature: {e}")
 
 @feature.command(name="list")
 @click.pass_context

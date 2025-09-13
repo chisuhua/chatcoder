@@ -71,7 +71,7 @@ class IWorkflowEngine(ABC):
         pass
 
     @abstractmethod
-    def start_workflow_instance(self, workflow_definition: WorkflowDefinition, initial_context: Dict[str, Any], feature_id: str) -> str:
+    def start_workflow_instance(self, workflow_schema: Dict[str, Any], initial_context: Dict[str, Any], feature_id: str) -> str:
         """
         启动一个新的工作流实例。
 
@@ -97,17 +97,6 @@ class IWorkflowEngine(ABC):
         Returns:
             WorkflowInstanceState: 更新后的工作流实例状态。
         """
-        pass
-
-    
-    @abstractmethod
-    def get_current_task_id_for_feature(self, feature_id: str) -> Optional[str]:
-        """根据 feature_id 获取当前活动（非完成）任务的 instance_id。"""
-        pass
-
-    @abstractmethod
-    def list_all_feature_ids(self) -> List[str]:
-        """获取所有已知的 feature_id 列表。"""
         pass
 
     # 可以在这里添加更多抽象方法，例如 determine_next_phase

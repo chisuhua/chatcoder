@@ -80,12 +80,11 @@ class ChatCoder:
     # --- 特性管理 ---
     def start_new_feature(self, description: str, workflow_name: str = "default") -> Dict[str, str]:
         try:
-            schema: WorkflowDefinition = self.workflow_engine.load_workflow_schema(workflow_name)
-            if not schema.phases:
+            schema: dict = self.workflow_engine.load_workflow_schema(workflow_name)
+            if not schema.get("phases"):
                  raise ValueError(f"Workflow '{workflow_name}' has no phases defined.")
 
             feature_id = self.task_orchestrator.generate_feature_id(description)
-            # first_phase_def = schema.phases[0] # 可用于返回更多信息
 
             initial_context = {
                 "source": "cli_start",
@@ -94,7 +93,7 @@ class ChatCoder:
             }
             
             instance_id: str = self.workflow_engine.start_workflow_instance(
-                workflow_definition=schema,
+                workflow_schema=schema,
                 initial_context=initial_context,
                 feature_id=feature_id
             )
@@ -124,7 +123,7 @@ class ChatCoder:
     def confirm_task_and_advance(self, feature_id: str, ai_response_summary: Optional[str] = None) -> Optional[Dict[str, Any]]:
         try:
             # 1. 获取当前任务 ID
-            current_task_id: Optional[str] = self.workflow_engine.get_current_task_id_for_feature(feature_id)
+            current_task_id: Optional[str] = self.state_store.get_current_task_id_for_feature(feature_id)
             if not current_task_id:
                  raise ValueError(f"Could not find current active task ID for feature {feature_id}.")
 
@@ -171,7 +170,9 @@ class ChatCoder:
     def get_all_features_status(self) -> List[Dict[str, Any]]:
         try:
             # 假设 chatflow 提供此方法
-            all_feature_ids: List[str] = self.workflow_engine.list_all_feature_ids()
+            all_feature_ids: List[str] = self.state_store.list_all_feature_ids()
+            import pdb
+            pdb.set_trace()
             summaries = []
             for fid in all_feature_ids:
                 try:
