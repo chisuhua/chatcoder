@@ -4,126 +4,34 @@ ChatFlow 核心接口 - 工作流引擎 (IWorkflowEngine)
 定义了工作流引擎应提供的核心能力。
 """
 
-from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional, List
-# 假设核心数据结构定义在 models.py 中
-from .state import IWorkflowStateStore
-from .models import WorkflowInstanceState, WorkflowInstanceStatus, WorkflowDefinition
+from dataclasses import asdict
+from abc import ABC, abstractmethod
+from ..storage.state import IWorkflowStateStore
+from .models import WorkflowStartResult, WorkflowState, HistoryEntry
 
 class IWorkflowEngine(ABC):
-    """
-    抽象基类，定义工作流引擎的接口。
-    """
+    """工作流引擎接口"""
     def __init__(self, state_store: IWorkflowStateStore):
-        """
-        初始化工作流引擎。
-
-        Args:
-            state_store (IWorkflowStateStore): 用于持久化和加载实例状态的存储接口实现。
-        """
         self.state_store = state_store
 
     @abstractmethod
-    def load_workflow_schema(self, name: str = "default") -> dict:
-        """ 加载指定名称的工作流模式（YAML 定义）。 """
-        pass
-
-    @abstractmethod
     def get_feature_status(self, feature_id: str, schema_name: str = "default") -> Dict[str, Any]:
-        """
-        获取指定特性的完整状态。
-
-        Args:
-            feature_id (str): 特性 ID。
-            schema_name (str, optional): 使用的工作流名称 (默认 "default")。
-
-        Returns:
-            Dict[str, Any]: 包含特性状态信息的字典。
-                通常包括：
-                - feature_id (str)
-                - schema (str): schema name
-                - workflow (str): workflow name
-                - phases (Dict[str, str]): 阶段名称到其状态的映射
-                - current_phase (Optional[str]): 最后一个完成的阶段
-                - next_phase (Optional[str]): 推荐的下一个阶段
-                - completed_count (int): 已完成的阶段数
-                - total_count (int): 总阶段数
-        """
         pass
 
     @abstractmethod
-    def recommend_next_phase(self, feature_id: str, schema_name: str = "default") -> Optional[Dict[str, Any]]:
-        """
-        为给定特性推荐下一个阶段。
-
-        Args:
-            feature_id (str): 特性 ID。
-            schema_name (str, optional): 使用的工作流名称 (默认 "default")。
-
-        Returns:
-            Optional[Dict[str, Any]]: 包含推荐信息的字典，如果特性已完成则返回 None。
-                字典通常包括：
-                - 'phase' (str): 推荐的阶段名称。
-                - 'reason' (str): 推荐原因。
-                - 'source' (str): 推荐来源 ('standard' 或 'smart')。
-                - 'current_phase' (str, optional): 当前最后一个完成的阶段。
-        """
+    def start_workflow_instance(self, workflow_schema: Dict[str, Any], initial_context: Dict[str, Any], feature_id: str, meta: Optional[Dict]) -> WorkflowStartResult:
         pass
 
     @abstractmethod
-    def start_workflow_instance(self, workflow_schema: Dict[str, Any], initial_context: Dict[str, Any], feature_id: str) -> str:
-        """
-        启动一个新的工作流实例。
+    def trigger_next_step(self, instance_id: str, trigger_data: Optional[Dict] = None, dry_run: bool = False, meta: Optional[Dict] = None) -> WorkflowState:
+        pass
 
-        Args:
-            workflow_definition (WorkflowDefinition): 工作流定义对象。
-            initial_context (Dict[str, Any]): 初始上下文。
-            feature_id (str): 关联的特性 ID。
 
-        Returns:
-            str: 新创建的工作流实例 ID。
-        """
+    @abstractmethod
+    def get_workflow_state(self, instance_id: str) -> Optional[WorkflowState]: # 添加 instance_id 参数
         pass
 
     @abstractmethod
-    def trigger_next_step(self, instance_id: str, trigger_data: Optional[Dict[str, Any]] = None) -> WorkflowInstanceState:
-        """
-        触发工作流实例的下一步执行。
-
-        Args:
-            instance_id (str): 工作流实例 ID。
-            trigger_data (Optional[Dict[str, Any]]): 触发数据（例如，来自 AI 的输出）。
-
-        Returns:
-            WorkflowInstanceState: 更新后的工作流实例状态。
-        """
+    def get_workflow_history(self) -> List[HistoryEntry]:
         pass
-
-    # 可以在这里添加更多抽象方法，例如 determine_next_phase
-    # @abstractmethod
-    # def determine_next_phase(self, current_phase: str, ai_response_content: str, context: Dict[str, Any]) -> Optional[str]:
-    #     """
-    #     基于AI响应内容和上下文智能决策下一阶段。
-    #
-    #     Args:
-    #         current_phase (str): 当前（已完成）的阶段名称。
-    #         ai_response_content (str): AI 生成的响应内容。
-    #         context (Dict[str, Any]): 任务的完整上下文信息。
-    #
-    #     Returns:
-    #         Optional[str]: 建议的下一个阶段名称。如果应遵循标准工作流，则返回 None。
-    #     """
-    #     pass
-
-    # @abstractmethod
-    # def get_workflow_instance_status(self, instance_id: str) -> 'WorkflowInstanceStatus':
-    #     """
-    #     获取工作流实例的当前状态。
-    #
-    #     Args:
-    #         instance_id (str): 工作流实例 ID。
-    #
-    #     Returns:
-    #         WorkflowInstanceStatus: 工作流实例状态。
-    #     """
-    #     pass

@@ -5,68 +5,105 @@ ChatFlow 核心数据模型
 """
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Dict, Any, List, Optional
 from enum import Enum
 import yaml
 
-class WorkflowInstanceStatus(Enum):
-    """
-    定义工作流实例的可能状态。
-    """
+class WorkflowStatus(Enum):
     CREATED = "created"
     RUNNING = "running"
     PAUSED = "paused"
-    CONFIRMED = "confirmed"
     COMPLETED = "completed"
     FAILED = "failed"
 
+class TaskStatus(Enum):
+    PENDING = "pending"
+    RUNNING = "running"
+    SUCCESS = "success"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+
 @dataclass
-class WorkflowInstanceState:
-    """
-    描述一个工作流实例的完整状态。
-    由 ChatFlow 内部管理和持久化。
-    """
+class HistoryEntry:
+    event_type: str  # workflow_started, phase_started, phase_completed, etc.
+    phase: str
+    task: str
+    timestamp: float
+    #started_at: float
+    #ended_at: Optional[float] = None
+    #status: str = "running"  # running, completed, failed
+    data: Dict[str, Any] = field(default_factory=dict)  # trigger_data_snapshot, metrics等
+
+@dataclass
+class TaskExecutionRecord:
+    phase_name: str
+    status: str
+    started_at: float
+    ended_at: Optional[float] = None
+    prompt_checksum: str = ""
+    response_checksum: str = ""
+    artifact_paths: Dict[str, str] = field(default_factory=dict)
+
+@dataclass
+class WorkflowState:
+    """内存中完整运行时状态"""
     instance_id: str
-    feature_id: str # 关联到 ChatCoder 的 feature_id
-    workflow_name: str # 使用的工作流定义名称 (e.g., "default")
-    
-    current_phase: Optional[str] = None
-    history: List[Dict[str, Any]] = field(default_factory=list) # 阶段执行历史
-    variables: Dict[str, Any] = field(default_factory=dict) # 工作流实例级别变量/上下文
-    
-    status: WorkflowInstanceStatus = WorkflowInstanceStatus.CREATED
-    
-    created_at: str = ""
-    updated_at: str = ""
-    
-    # 可以根据需要添加更多字段，例如：
-    # metadata: Dict[str, Any] = field(default_factory=dict) # 用户或系统元数据
-
-@dataclass
-class WorkflowPhaseDefinition:
-    """表示工作流定义中的一个阶段。"""
-    name: str
-    title: str
-    template: str
-    # 可以添加更多配置，如条件、超时等
-    # condition: Optional[str] = None
-    # timeout_seconds: Optional[int] = None
-
-@dataclass
-class WorkflowDefinition:
-    """表示一个完整的工作流定义。"""
-    name: str
-    description: str
-    phases: List[WorkflowPhaseDefinition]
+    feature_id: str
+    workflow_name: str
+    current_phase: str
+    variables: Dict[str, Any]
+    status: WorkflowStatus # 使用 WorkflowStatus 枚举
+    history: List[HistoryEntry] = field(default_factory=list)
+    created_at: float = field(default_factory=lambda: datetime.now().timestamp())
+    updated_at: float = field(default_factory=lambda: datetime.now().timestamp()) # 修正拼写: t imestamp -> timestamp
+    meta: Dict[str, Any] = field(default_factory=dict)
+    automation_level: int = 60  # 0-100
 
     @classmethod
-    def from_dict(cls, data: dict) -> 'WorkflowDefinition':
-        """从字典（通常是 YAML 加载的结果）创建 WorkflowDefinition 实例。"""
-        name = data.get("name", "unnamed")
-        description = data.get("description", "")
-        phases_data = data.get("phases", [])
-        phases = [WorkflowPhaseDefinition(**pd) for pd in phases_data]
-        return cls(name=name, description=description, phases=phases)
+    def from_dict(cls, data: Dict[str, Any]) -> 'WorkflowState':
+        """
+        从字典创建 WorkflowState 实例，正确处理 status 和 history 字段。
+        """
+        data = data.copy()
 
+        status_str = data.get("status")
+        if isinstance(status_str, str):
+            matched_status = None
+            for status_member in WorkflowStatus:
+                if status_member.value.strip() == status_str.strip():
+                    matched_status = status_member
+                    break
+            if matched_status is None:
+                print(f"Warning: Unknown status string '{status_str}', defaulting to WorkflowStatus.CREATED")
+                data["status"] = WorkflowStatus.CREATED
+            else:
+                data["status"] = matched_status
+        elif not isinstance(status_str, WorkflowStatus):
+            data["status"] = WorkflowStatus.CREATED
 
+        raw_history = data.get("history", [])
+        if raw_history and isinstance(raw_history, list) and isinstance(raw_history[0], dict):
+            converted_history = [HistoryEntry(**event_dict) for event_dict in raw_history]
+            data["history"] = converted_history
 
+        return cls(**data)
+
+@dataclass
+class WorkflowStatusInfo:
+    """对外暴露的精简状态"""
+    instance_id: str
+    status: str  # "running", "completed"
+    progress: float  # 0.0 - 1.0
+    current_phase: str
+    feature_id: str
+    created_at: float
+    updated_at: float
+    depth: int = 0  # 递归深度 (v2预留)
+
+# 返回值对象
+@dataclass
+class WorkflowStartResult:
+    instance_id: str
+    initial_phase: str
+    created_at: float
