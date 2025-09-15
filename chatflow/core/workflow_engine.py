@@ -98,45 +98,14 @@ class WorkflowEngine(IWorkflowEngine):
  
     def start_workflow_instance(
         self,
-        workflow_schema: Dict[str, Any],
+        schema_name: str,
         initial_context: Dict[str, Any],
         feature_id: str,
-        meta: Optional[Dict] = None
+        meta: Optional[Dict] = None,
+        schema_version: str = "latest"
     ) -> WorkflowStartResult:
         with self._lock:
-            def dict_to_phase_definition(phase_dict: Dict) -> PhaseDefinition:
-                if not isinstance(phase_dict, dict):
-                    return phase_dict
-                phase_data = phase_dict.copy()
-                if 'task' not in phase_data:
-                    phase_data['task'] = 'default_task' # 或者 'unknown_task'
-                condition_data = phase_data.get('condition')
-                if condition_data and isinstance(condition_data, dict):
-                    def dict_to_condition_expression(cond_dict: Dict) -> ConditionExpression:
-                        if not isinstance(cond_dict, dict):
-                            return cond_dict
-                        operands_data = cond_dict.get('operands', [])
-                        converted_operands = []
-                        for op_data in operands_data:
-                            if isinstance(op_data, dict) and 'field' in op_data and 'operator' in op_data and 'value' in op_data:
-                                converted_operands.append(ConditionTerm(**op_data))
-                            elif isinstance(op_data, dict) and 'operator' in op_data:
-                                converted_operands.append(dict_to_condition_expression(op_data))
-                            else:
-                                converted_operands.append(op_data)
-                        return ConditionExpression(operator=cond_dict['operator'], operands=converted_operands)
-                    phase_data['condition'] = dict_to_condition_expression(condition_data)
-                return PhaseDefinition(**phase_data)
-
-            schema_phases_data = workflow_schema.get('phases', [])
-            converted_phases = [dict_to_phase_definition(p_dict) for p_dict in schema_phases_data]
-
-            schema_data_for_init = {
-                "name": workflow_schema['name'],
-                "version": workflow_schema.get('version', '1.0'),
-                "phases": converted_phases
-            }
-            schema = WorkflowSchema(**schema_data_for_init)
+            schema: WorkflowSchema = self._load_schema_from_file(schema_name, schema_version)
             schema.validate()
 
             self._schema_cache[schema.name] = schema
@@ -275,12 +244,6 @@ class WorkflowEngine(IWorkflowEngine):
         
         state_data = self.state_store.load_state(instance_id)
         if state_data:
-            #raw_history = state_data.get("history", [])
-            #if raw_history and isinstance(raw_history[0], dict):
-            #    # 假设如果列表第一个元素是 dict，则整个列表都需要转换
-            #    converted_history = [HistoryEntry(**event_dict) for event_dict in raw_history]
-            #    # 更新 state_data 中的 history 字段
-            #    state_data["history"] = converted_history
             state = WorkflowState.from_dict(state_data)
             self._cache_state(instance_id, state)
             return state

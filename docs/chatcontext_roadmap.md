@@ -46,10 +46,9 @@ classDiagram
 ```
 
 ### 核心增强
-1. **单例模式**：`ContextManager` 实现进程内单例，确保多模块使用同一实例。
-2. **请求标准化**：`ContextRequest` 增加 `chatflow_instance_id` 字段，与 ChatFlow 实例绑定。
-3. **缓存机制**：对频繁访问的文件内容进行内存缓存（TTL=60秒）。
-4. **错误隔离**：任一 Provider 失败不影响整体流程，记录错误但继续执行。
+1. **请求标准化**：`ContextRequest` 增加 `chatflow_instance_id` 字段，与 ChatFlow 实例绑定。
+2. **缓存机制**：对频繁访问的文件内容进行内存缓存（TTL=60秒）。
+3. **错误隔离**：任一 Provider 失败不影响整体流程，记录错误但继续执行。
 
 ### 接口演进
 ```python

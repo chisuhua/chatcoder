@@ -8,7 +8,7 @@ from typing import Dict, Any, Optional, List
 from dataclasses import asdict
 from abc import ABC, abstractmethod
 from ..storage.state import IWorkflowStateStore
-from .models import WorkflowStartResult, WorkflowState, HistoryEntry
+from .models import WorkflowStartResult, WorkflowState, WorkflowStatusInfo, HistoryEntry
 
 class IWorkflowEngine(ABC):
     """工作流引擎接口"""
@@ -20,7 +20,7 @@ class IWorkflowEngine(ABC):
         pass
 
     @abstractmethod
-    def start_workflow_instance(self, workflow_schema: Dict[str, Any], initial_context: Dict[str, Any], feature_id: str, meta: Optional[Dict]) -> WorkflowStartResult:
+    def start_workflow_instance(self, schema_name: str, initial_context: Dict[str, Any], feature_id: str, meta: Optional[Dict], schema_version: str = "latest") -> WorkflowStartResult:
         pass
 
     @abstractmethod
@@ -33,5 +33,10 @@ class IWorkflowEngine(ABC):
         pass
 
     @abstractmethod
-    def get_workflow_history(self) -> List[HistoryEntry]:
+    def get_workflow_status_info(self, instance_id: str) -> Optional[WorkflowStatusInfo]: # 添加返回类型
         pass
+
+    @abstractmethod
+    def get_workflow_history(self, instance_id: str) -> List[HistoryEntry]: # 添加返回类型和 instance_id 参数
+        pass
+
