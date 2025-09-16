@@ -1,68 +1,73 @@
 # chatcontext/core/models.py
-"""
-ChatContext 核心数据模型
-定义了在上下文提供、管理和请求过程中使用的核心数据结构。
-"""
+"""ChatContext 核心数据模型"""
 
-from enum import Enum
-from typing import Dict, Any, Optional, List
 from dataclasses import dataclass, field
+from typing import Dict, Any, List, Optional, Union
+from enum import Enum
 
-# --- 上下文类型分类 ---
 class ContextType(Enum):
-    """
-    定义上下文的类型，帮助区分和管理不同来源或用途的上下文信息。
-    """
-    GUIDING = "guiding"       # 指导性上下文 (如系统提示词、任务目标)
-    INFORMATIONAL = "informational" # 信息性上下文 (如项目代码、文档、知识库)
-    ACTIONABLE = "actionable"   # 行动性上下文 (如历史输出、待执行指令)
+    """上下文信息的类型"""
+    INFORMATIONAL = "informational"  # 通用信息
+    GUIDING = "guiding"             # 指导性信息 (如项目结构、编码规范)
+    ACTIONABLE = "actionable"       # 可操作信息 (如安全警告、待办事项)
+    HISTORICAL = "historical"       # 历史交互记录
 
-# --- 上下文请求 ---
 @dataclass
 class ContextRequest:
     """
-    描述生成上下文所需的信息请求。
-    这是 ContextProvider 和 ContextManager 之间的主要通信载体。
+    向 ContextManager 发起上下文生成请求的数据结构。
     """
-    # 核心标识与信息
-    workflow_instance_id: str
-    phase_name: str
-    task_description: str
+    # --- 与 ChatFlow/ChatCoder 关联的核心字段 ---
+    workflow_instance_id: str # 对应 ChatCoder 传递的 instance_id
+    feature_id: str           # 对应 ChatCoder 传递的 feature_id
+    current_phase: str        # 对应 ChatCoder 传递的 phase_name
+    task_description: str     # 对应 ChatCoder 传递的 task_description
 
+    # --- 项目和环境信息 ---
     project_type: Optional[str] = None
     project_name: Optional[str] = None
     project_language: Optional[str] = None
 
-    # 上下文依赖
-    previous_outputs: Dict[str, Any] = field(default_factory=dict) # 来自前序阶段/任务的输出
-    user_inputs: Dict[str, Any] = field(default_factory=dict)      # 用户显式提供的信息
+    # --- 历史和用户输入 ---
+    previous_outputs: Dict[str, Any] = field(default_factory=dict)
+    user_inputs: Dict[str, Any] = field(default_factory=dict)
 
-    # --- 调试/预览标志 ---
-    is_preview: bool = False       # 是否为预览模式
-    is_for_current_task: bool = False # 是否为当前活动任务生成上下文
+    # --- 请求约束和偏好 (v1.1) ---
+    required_types: List[ContextType] = field(default_factory=list)
+    automation_level: Optional[str] = None # e.g., 'low', 'medium', 'high'
+    risk_level: Optional[str] = None       # e.g., 'low', 'medium', 'high'
+    max_context_size: Optional[int] = None
 
-    # 要求
-    required_types: List[ContextType] = field(default_factory=list) # 请求的上下文类型
-    # 可以扩展：例如，指定需要哪些特定文件的上下文，或者上下文的详细程度等
+    # --- 模式标志 ---
+    is_preview: bool = False
+    is_for_current_task: bool = False
 
-# --- 提供的上下文 ---
 @dataclass
 class ProvidedContext:
     """
-    由单个 ContextProvider 生成的上下文内容。
+    单个 ContextProvider 提供的上下文片段。
     """
-    content: Dict[str, Any] # 提供的具体上下文数据 (例如, {'project_info': '...', 'relevant_files': '...'})
-    context_type: ContextType # 该上下文的类型
-    provider_name: str        # 提供此上下文的 Provider 名称 (用于调试/元数据)
-    metadata: Dict[str, Any] = field(default_factory=dict) # 额外的元数据 (例如, 生成时间, 来源详情)
+    content: Dict[str, Any]         # 实际的上下文内容
+    context_type: ContextType       # 内容类型
+    provider_name: str              # 提供此内容的 Provider 名称
+    meta: Dict[str, Any] = field(default_factory=dict) # Provider 特定元数据
 
-# --- (未来) 上下文管道配置 (可选，用于高级场景) ---
-# @dataclass
-# class ContextPipelineConfig:
-#     """
-#     定义一个上下文生成管道的配置。
-#     """
-#     name: str
-#     providers: List[str] # Provider 名称列表，定义执行顺序或优先级
-#     merge_strategy: str  # 合并策略 (例如, 'merge_dicts', 'concatenate_markdown')
-#     # 其他配置项...
+    # --- v1.1 增强字段 ---
+    relevance_score: float = 1.0    # 相关性评分 (0.0 - 1.0)
+    summary: Optional[str] = None   # 内容摘要
+    size_estimate: Optional[int] = None # 大小估算 (字符数/token数)
+
+@dataclass
+class FinalContext:
+    """
+    ContextManager 最终合并、处理后返回的上下文。
+    """
+    merged_data: Dict[str, Any]  # 合并后的字典，供 Jinja2 渲染使用
+
+    # --- 诊断和元信息 (v1.0/v1.1) ---
+    provider_diagnostics: List[Dict[str, Any]] = field(default_factory=list)
+    generation_time: float = 0.0  # 生成总耗时 (秒)
+    total_size: int = 0           # 估算的总大小
+    suggestions: List[str] = field(default_factory=list) # (v1.1) 增强建议
+
+    # 可添加更多元数据，如使用的 Provider 列表等

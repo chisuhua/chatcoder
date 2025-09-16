@@ -8,7 +8,7 @@ except ImportError:
     CHATCONTEXT_AVAILABLE = False
     raise RuntimeError("chatcontext library is required.")
 
-class ContextManagerAdapter:
+class ContextManager:
     def __init__(self):
         if not CHATCONTEXT_AVAILABLE:
             raise RuntimeError("chatcontext is required but not available.")

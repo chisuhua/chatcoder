@@ -1,220 +1,298 @@
-# chatcoder/tests/test_cli.py
-"""
-ChatCoder CLI 入口点单元测试
-"""
+# tests/test_cli.py
+import unittest
+from unittest.mock import patch, MagicMock, call, mock_open
+from click.testing import CliRunner
+import tempfile
+import shutil
+from pathlib import Path
+import yaml
+import json
 
-import pytest
-from unittest.mock import MagicMock
+# Import the CLI group
+from chatcoder.cli import cli
 
-# --- 导入 CLI 应用 ---
-# Dependencies are managed via conftest.py fixtures
+class TestChatCoderCLI(unittest.TestCase):
 
-class TestChatCoderCLI:
-    """测试 ChatCoder CLI 命令"""
-
-    # --- 测试 CLI 主入口和帮助 ---
-    def test_cli_entry_no_command_shows_help(self, runner):
-        """测试不带任何命令运行 CLI 应显示帮助信息"""
-        from chatcoder.cli import cli
-        result = runner.invoke(cli, [])
-        assert result.exit_code == 0
-        assert "Usage:" in result.output
-        assert "ChatCoder - AI-Native Development Assistant" in result.output
-        assert "init" in result.output
-        assert "feature" in result.output
-        assert "task" in result.output
-
-    def test_cli_version(self, runner):
-        """测试 --version 选项"""
-        from chatcoder.cli import cli
-        result = runner.invoke(cli, ['--version'])
-        assert result.exit_code == 0
-        assert "ChatCoder CLI v0.1.0" in result.output
-
-    # --- 测试 init 命令 ---
-    # Note: init command involves file I/O and calling init_project function.
-    # Testing it fully would require mocking 'chatcoder.init' module functions like 'perform_init_project'
-    # and 'validate_config_content', and managing temporary directories/files.
-    # This is a simplified test focusing on the command structure and basic flow.
-    # A more comprehensive test would involve those mocks.
-    def test_init_command_basic_flow(self, runner, tmp_path, monkeypatch):
-        """测试 init 命令的基本执行流程 (简化版)"""
-        from chatcoder.cli import cli
+    def setUp(self):
+        """Set up test environment before each test method."""
+        self.test_dir = tempfile.mkdtemp()
+        self.original_cwd = Path.cwd()
+        # Change to the temporary directory for the test
+        import os
+        os.chdir(self.test_dir)
         
-        # Change to a temporary directory for this test
-        monkeypatch.chdir(tmp_path)
+        self.runner = CliRunner()
+        self.chatcoder_dir = Path(".chatcoder")
+        self.chatcoder_dir.mkdir()
+
+        # Create mock config and context files
+        self.config_data = {"test_config": "value1", "core_patterns": ["src/*.py"]}
+        self.context_data = {"project_name": "MyProject", "custom_key": "custom_value"}
+        with open(self.chatcoder_dir / "config.yaml", 'w') as f:
+            yaml.dump(self.config_data, f)
+        with open(self.chatcoder_dir / "context.yaml", 'w') as f:
+            yaml.dump(self.context_data, f)
+
+    def tearDown(self):
+        """Tear down test environment after each test method."""
+        import os
+        os.chdir(self.original_cwd)
+        shutil.rmtree(self.test_dir, ignore_errors=True)
+
+    # --- init command tests ---
+    @patch('chatcoder.cli.perform_init_project')
+    def test_init_command_success(self, mock_perform_init):
+        """Test successful execution of the init command."""
+        mock_perform_init.return_value = ("mock_config_content", "mock_context_content")
         
-        # Mock the init_project function from chatcoder.init (assuming it's moved there)
-        # We need to patch where it's used, which is inside cli.py's local import scope.
-        # Let's assume cli.py does 'from chatcoder.init import init_project as perform_init_project'
-        # So we patch chatcoder.cli.perform_init_project
-        mock_init_content = ("# Mock config content\nkey: value\n", "# Mock context content\nproject: test\n")
+        # Delete existing files to trigger init logic
+        (self.chatcoder_dir / "config.yaml").unlink()
+        (self.chatcoder_dir / "context.yaml").unlink()
+
+        result = self.runner.invoke(cli, ['init'], input='y\ny\n') # Simulate user 'y' confirms
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn("项目初始化", result.output)
+        self.assertIn("初始化完成！", result.output)
+        # Verify files and directories are created
+        self.assertTrue((self.chatcoder_dir / "config.yaml").exists())
+        self.assertTrue((self.chatcoder_dir / "context.yaml").exists())
+        self.assertTrue((self.chatcoder_dir / "workflow_instances").exists())
+
+    # --- context command tests ---
+    def test_context_command(self):
+        """Test the context command displays raw config files."""
+        result = self.runner.invoke(cli, ['context'])
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn("项目原始配置和上下文", result.output)
+        self.assertIn("### config.yaml 内容:", result.output)
+        self.assertIn("### context.yaml 内容:", result.output)
+        # Check if JSON output contains key data (simple string check)
+        self.assertIn("test_config", result.output)
+        self.assertIn("project_name", result.output)
+
+    # --- feature start command tests ---
+    @patch('chatcoder.cli.Thinker') # Patch the Thinker class itself
+    def test_feature_start_command(self, mock_thinker_cls):
+        """Test the feature start command."""
+        mock_thinker = MagicMock()
+        mock_thinker_cls.return_value = mock_thinker
+        mock_thinker.start_new_feature.return_value = {
+            "feature_id": "feat_test",
+            "description": "Test feature",
+            "instance_id": "wfi_123"
+        }
+
+        result = self.runner.invoke(cli, ['feature', 'start', '-d', 'Test feature description'])
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn("🚀 Started new feature workflow: feat_test", result.output)
+        mock_thinker_cls.assert_called_once() # Check Thinker was instantiated
+        mock_thinker.start_new_feature.assert_called_once_with('Test feature description', 'default') # Check method call
+
+    # --- feature list command tests ---
+    @patch('chatcoder.cli.Thinker')
+    def test_feature_list_command(self, mock_thinker_cls):
+        """Test the feature list command."""
+        mock_thinker = MagicMock()
+        mock_thinker_cls.return_value = mock_thinker
+        mock_thinker.list_all_features.return_value = ['feat_1', 'feat_2']
+        # Mock get_feature_instances for counts if needed in the test
+        mock_thinker.get_feature_instances.side_effect = [
+            [{"instance_id": "wfi_1"}], # For feat_1
+            [{"instance_id": "wfi_2a"}, {"instance_id": "wfi_2b"}] # For feat_2
+        ]
+
+        result = self.runner.invoke(cli, ['feature', 'list'])
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn("Features List", result.output)
+        self.assertIn("feat_1", result.output)
+        self.assertIn("1", result.output) # Instance count for feat_1
+        self.assertIn("feat_2", result.output)
+        self.assertIn("2", result.output) # Instance count for feat_2
+        mock_thinker_cls.assert_called_once()
+        mock_thinker.list_all_features.assert_called_once()
+        self.assertEqual(mock_thinker.get_feature_instances.call_count, 2)
+        mock_thinker.get_feature_instances.assert_any_call("feat_1")
+        mock_thinker.get_feature_instances.assert_any_call("feat_2")
+
+    # --- feature status command tests ---
+    @patch('chatcoder.cli.Thinker')
+    def test_feature_status_command(self, mock_thinker_cls):
+        """Test the feature status command."""
+        mock_thinker = MagicMock()
+        mock_thinker_cls.return_value = mock_thinker
+        mock_thinker.get_feature_instances.return_value = [
+            {
+                "instance_id": "wfi_abc123",
+                "status": "running",
+                "current_phase": "analyze",
+                "progress": 0.5,
+                "updated_at": 1700000000.0
+            },
+            {
+                "instance_id": "wfi_def456",
+                "status": "completed",
+                "current_phase": "implement",
+                "progress": 1.0,
+                "updated_at": 1700000100.0
+            }
+        ]
+
+        result = self.runner.invoke(cli, ['feature', 'status', 'feat_test'])
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn("Instances for Feature: feat_test", result.output)
+        self.assertIn("wfi_abc123", result.output)
+        self.assertIn("running", result.output)
+        self.assertIn("analyze", result.output)
+        self.assertIn("50%", result.output)
+        self.assertIn("wfi_def456", result.output)
+        self.assertIn("completed", result.output)
+        self.assertIn("implement", result.output)
+        self.assertIn("100%", result.output)
+        mock_thinker_cls.assert_called_once()
+        mock_thinker.get_feature_instances.assert_called_once_with("feat_test")
+
+    # --- feature delete command tests ---
+    @patch('chatcoder.cli.Thinker')
+    def test_feature_delete_command(self, mock_thinker_cls):
+        """Test the feature delete command."""
+        mock_thinker = MagicMock()
+        mock_thinker_cls.return_value = mock_thinker
+        mock_thinker.delete_feature.return_value = True
+
+        result = self.runner.invoke(cli, ['feature', 'delete', 'feat_to_delete'])
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn("Feature 'feat_to_delete' and its instances have been deleted.", result.output)
+        mock_thinker_cls.assert_called_once()
+        mock_thinker.delete_feature.assert_called_once_with("feat_to_delete")
+
+    # --- task apply command tests (using --id) ---
+    @patch('chatcoder.cli.Thinker')
+    def test_task_apply_command_with_id(self, mock_thinker_cls):
+        """Test the task apply command using --id."""
+        # Setup mocks
+        mock_thinker = MagicMock()
+        mock_thinker_cls.return_value = mock_thinker
+
+        mock_coder_constructor = MagicMock()
+        mock_coder_instance = MagicMock()
+        mock_coder_instance.apply_task.return_value = True # Simulate success
+        mock_coder_constructor.return_value = mock_coder_instance
+
+        # Create a temporary file for the AI response
+        import tempfile
+        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt') as tf:
+            tf.write("AI generated content for new_file.py")
+            response_file_path = tf.name
+
+        try:
+            # Patch Coder within the test context
+            with patch('chatcoder.cli.Coder', mock_coder_constructor):
+                result = self.runner.invoke(cli, ['task', 'apply', '--id', 'wfi_test123', response_file_path])
+
+            self.assertEqual(result.exit_code, 0)
+            self.assertIn("AI response from", result.output) # Check for success message
+            mock_thinker_cls.assert_called_once() # Ensure Thinker service was loaded
+            mock_coder_constructor.assert_called_once_with(mock_thinker) # Ensure Coder was created with Thinker
+            # Check that the response file content was read and passed
+            mock_coder_instance.apply_task.assert_called_once()
+            called_args, called_kwargs = mock_coder_instance.apply_task.call_args
+            self.assertEqual(called_args[0], 'wfi_test123') # Check instance_id
+            self.assertIn("AI generated content", called_args[1]) # Check content (partial match)
+
+        finally:
+            import os
+            os.unlink(response_file_path) # Clean up temp file
+
+    # --- feature task apply command tests ---
+    @patch('chatcoder.cli.Thinker')
+    def test_feature_task_apply_command(self, mock_thinker_cls):
+        """Test the feature task apply command."""
+        # Setup mocks for Thinker and Coder interaction within feature group
+        mock_thinker = MagicMock()
+        mock_thinker_cls.return_value = mock_thinker
+        # Mock the resolution of feature_id to instance_id
+        mock_thinker.get_active_instance_for_feature.return_value = 'wfi_active456'
+
+        mock_coder_constructor = MagicMock()
+        mock_coder_instance = MagicMock()
+        mock_coder_instance.apply_task.return_value = True # Simulate success
+        mock_coder_constructor.return_value = mock_coder_instance
+
+        import tempfile
+        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt') as tf:
+            tf.write("AI generated content for feature_file.py")
+            response_file_path = tf.name
+
+        try:
+            # Patch Coder within the test context
+            with patch('chatcoder.cli.Coder', mock_coder_constructor):
+                # Invoke the feature task apply command
+                result = self.runner.invoke(cli, ['feature', 'task', 'apply', 'feat_test789', response_file_path])
+
+            self.assertEqual(result.exit_code, 0)
+            self.assertIn("AI response from", result.output) # Check for success message
+            mock_thinker_cls.assert_called_once()
+            # Check that feature ID was resolved to instance ID
+            mock_thinker.get_active_instance_for_feature.assert_called_once_with('feat_test789')
+            mock_coder_constructor.assert_called_once_with(mock_thinker)
+            # Check that Coder.apply_task was called with the resolved instance_id
+            mock_coder_instance.apply_task.assert_called_once()
+            called_args, called_kwargs = mock_coder_instance.apply_task.call_args
+            self.assertEqual(called_args[0], 'wfi_active456') # Check resolved instance_id
+            self.assertIn("AI generated content", called_args[1]) # Check content (partial match)
+
+        finally:
+            import os
+            os.unlink(response_file_path)
+
+    # --- workflow list command tests ---
+    def test_workflow_list_command(self):
+        """Test the workflow list command."""
+        # Create mock workflow templates files
+        workflows_dir = Path("ai-prompts") / "workflows"
+        workflows_dir.mkdir(parents=True)
+        (workflows_dir / "default.yaml").touch()
+        (workflows_dir / "security_review.yaml").touch()
+        (workflows_dir / "data_migration.json").touch() # Different extension
+
+        result = self.runner.invoke(cli, ['workflow', 'list'])
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn("Available Workflows", result.output)
+        self.assertIn("default", result.output)
+        self.assertIn("security_review", result.output)
+        # .json file should not be listed if logic is correct
+        self.assertNotIn("data_migration", result.output)
+
+    # --- config validate command tests ---
+    def test_config_validate_command(self):
+        """Test the config validate command."""
+        # This test assumes validate_config_content is a simple function that doesn't throw on valid YAML
+        # A more thorough test would mock validate_config_content
+        result = self.runner.invoke(cli, ['validate'])
+
+        self.assertEqual(result.exit_code, 0)
+        self.assertIn("配置文件验证通过！", result.output)
+
+    # --- Missing config files error handling ---
+    def test_missing_config_files_error(self):
+        """Test CLI command error handling when config files are missing."""
+        # Delete config files
+        (self.chatcoder_dir / "config.yaml").unlink()
+        (self.chatcoder_dir / "context.yaml").unlink()
         
-        with pytest.MonkeyPatch().context() as m:
-            # Patch the specific function called by cli.py
-            m.setattr('chatcoder.cli.perform_init_project', lambda: mock_init_content)
-            m.setattr('chatcoder.cli.validate_config_content', lambda x: None) # Mock validation
-            
-            # Simulate user declining overwrite if dir exists (though it shouldn't in tmp_path)
-            # But let's test the overwrite path too by pre-creating the dir
-            (tmp_path / ".chatcoder").mkdir()
-            (tmp_path / ".chatcoder" / "context.yaml").write_text("old: content")
-            
-            # Run init command, simulate user confirming overwrite
-            result = runner.invoke(cli, ['init'], input='y\ny\n') # Confirm overwrite for both files if prompted
-
-            assert result.exit_code == 0
-            assert "初始化完成！" in result.output
-            assert (tmp_path / ".chatcoder" / "config.yaml").exists()
-            assert (tmp_path / ".chatcoder" / "context.yaml").exists()
-            # Further assertions could check file contents match mock_init_content
-
-    # --- 测试 feature 命令组 ---
-    def test_feature_start_command_success(self, runner, mock_cli_chatcoder):
-        """测试 feature start 命令成功执行"""
-        from chatcoder.cli import cli
+        # Try running a command that needs ChatCoder service
+        result = self.runner.invoke(cli, ['feature', 'list'])
         
-        description = "实现用户登录"
-        workflow = "default"
-        expected_feature_id = "feat_new_123"
+        self.assertNotEqual(result.exit_code, 0) # Should exit with error
+        self.assertIn("配置文件缺失", result.output)
+        self.assertIn("请先运行 `chatcoder init`", result.output)
 
-        result = runner.invoke(cli, ['feature', 'start', '-d', description, '-w', workflow])
-
-        assert result.exit_code == 0
-        assert f"Started new feature: {expected_feature_id}" in result.output
-        assert description in result.output
-        assert "Suggested next command:" in result.output
-        mock_cli_chatcoder.start_new_feature.assert_called_once_with(description, workflow)
-
-    def test_feature_list_command_success(self, runner, mock_cli_chatcoder):
-        """测试 feature list 命令成功执行"""
-        from chatcoder.cli import cli
-
-        result = runner.invoke(cli, ['feature', 'list'])
-
-        assert result.exit_code == 0
-        assert "Features List" in result.output
-        assert "feat_1" in result.output
-        assert "Test Feature 1" in result.output
-        assert "in_progress" in result.output
-        mock_cli_chatcoder.get_all_features_status.assert_called_once()
-
-    # --- 测试 task 命令组 ---
-    def test_task_prompt_command_success(self, runner, mock_cli_chatcoder):
-        """测试 task prompt <feature_id> 命令成功执行"""
-        from chatcoder.cli import cli
-        
-        feature_id = "feat_prompt_test"
-        mock_prompt_content = "这是为特性生成的 AI 提示词内容..."
-
-        result = runner.invoke(cli, ['task', 'prompt', feature_id])
-
-        assert result.exit_code == 0
-        assert f"Generating prompt for feature: {feature_id}" in result.output
-        # Check if prompt content is in the output (might be in a Panel, so check substring)
-        assert mock_prompt_content in result.output
-        mock_cli_chatcoder.generate_prompt_for_current_task.assert_called_once_with(feature_id)
-
-    def test_task_confirm_command_success_with_next(self, runner, mock_cli_chatcoder):
-        """测试 task confirm <feature_id> 命令成功执行并有下一步推荐"""
-        from chatcoder.cli import cli
-        
-        feature_id = "feat_confirm_test"
-        summary = "已完成分析"
-        expected_next_phase = "design"
-
-        result = runner.invoke(cli, ['task', 'confirm', feature_id, '--summary', summary])
-
-        assert result.exit_code == 0
-        assert f"Task for feature {feature_id} has been confirmed." in result.output
-        assert f"Recommended next phase: {expected_next_phase}" in result.output
-        mock_cli_chatcoder.confirm_task_and_advance.assert_called_once_with(feature_id, summary)
-
-    def test_task_preview_command_success(self, runner, mock_cli_chatcoder):
-        """测试 task preview <phase_name> <feature_id> 命令成功执行"""
-        from chatcoder.cli import cli
-        
-        phase_name = "test"
-        feature_id = "feat_preview_abc"
-        mock_preview_content = "这是预览的测试阶段提示词..."
-
-        result = runner.invoke(cli, ['task', 'preview', phase_name, feature_id])
-
-        assert result.exit_code == 0
-        assert f"Previewing prompt for phase '{phase_name}' of feature: {feature_id}" in result.output
-        assert mock_preview_content in result.output
-        mock_cli_chatcoder.preview_prompt_for_phase.assert_called_once_with(phase_name, feature_id)
-
-    # --- 测试 task apply 命令 ---
-    def test_task_apply_command_success(self, runner, mock_cli_chatcoder, tmp_path):
-        """测试 task apply <feature_id> <response_file> 命令成功执行"""
-        from chatcoder.cli import cli
-        
-        feature_id = "feat_apply_xyz"
-        response_file = tmp_path / "ai_response.txt"
-        response_content = "This is the AI's response to be applied."
-        response_file.write_text(response_content, encoding='utf-8')
-        
-        # Mock the apply_task method to return success
-        mock_cli_chatcoder.apply_task.return_value = True
-
-        result = runner.invoke(cli, ['task', 'apply', feature_id, str(response_file)])
-
-        assert result.exit_code == 0
-        assert f"Applying AI response for feature: {feature_id}" in result.output
-        assert f"AI response from '{response_file}' applied to feature '{feature_id}'." in result.output
-        # Verify the ChatCoder service's apply_task was called with correct content
-        mock_cli_chatcoder.apply_task.assert_called_once_with(feature_id, response_content)
-
-    def test_task_apply_command_file_not_found(self, runner, mock_cli_chatcoder):
-        """测试 task apply 命令处理文件不存在的情况"""
-        from chatcoder.cli import cli
-        
-        feature_id = "feat_apply_err"
-        non_existent_file = "non_existent_response.txt"
-
-        result = runner.invoke(cli, ['task', 'apply', feature_id, non_existent_file])
-
-        assert result.exit_code == 0 # CLI handles the error gracefully
-        assert f"Applying AI response for feature: {feature_id}" in result.output
-        assert f"AI response file not found: {non_existent_file}" in result.output
-        # apply_task should not have been called
-        mock_cli_chatcoder.apply_task.assert_not_called()
-
-    # --- 测试 workflow 命令组 ---
-    def test_workflow_list_command_success(self, runner, mock_cli_chatcoder):
-        """测试 workflow list 命令成功执行"""
-        from chatcoder.cli import cli
-
-        result = runner.invoke(cli, ['workflow', 'list'])
-
-        assert result.exit_code == 0
-        assert "Available Workflows" in result.output
-        assert "default" in result.output
-        assert "custom" in result.output
-        mock_cli_chatcoder.list_available_workflows.assert_called_once()
-
-    # --- 测试 validate 命令 ---
-    # Similar to init, validate involves calling external functions.
-    # A basic test checks the command structure.
-    def test_validate_command_basic_call(self, runner, mock_cli_chatcoder):
-        """测试 validate 命令被调用 (简化版)"""
-        from chatcoder.cli import cli
-        
-        # Mock the validate method or the underlying config check if it existed on the service
-        # For now, assume _load_chatcoder_service works and the service has a validate method
-        # or the cli calls a function. We mock the service creation part.
-        
-        result = runner.invoke(cli, ['validate'])
-
-        # Assert based on mock_cli_chatcoder setup or expected behavior
-        # If _load_chatcoder_service is called and then a method, the mock setup handles it.
-        # This test ensures the command path is executed.
-        assert result.exit_code == 0 # Or check specific output if mocked service behaves so.
-        # Specific assertions depend on how `validate` is implemented in cli.py
-        # If it calls a service method, mock_cli_chatcoder would need that method mocked.
-        # As the provided cli.py snippet doesn't show a detailed validate impl,
-        # we rely on the mock_cli_chatcoder fixture's default behavior or add specifics there.
-
-    # --- 其他 CLI 命令测试可以类似添加 ---
-    # ... (为其他 CLI 命令添加测试)
+if __name__ == '__main__':
+    unittest.main()

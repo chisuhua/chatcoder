@@ -1,6 +1,6 @@
-# chatcoder/cli.py
+# chatcoder/cli
 """
-ChatCoder CLI 主入口（重构版：通过服务层调用）
+ChatCoder CLI 主入口（重构版：通过 Thinker 和 Coder 服务层调用）
 """
 import click
 import json
@@ -12,28 +12,15 @@ from rich.panel import Panel
 from rich.table import Table
 
 # --- 导入新的服务类 ---
-from chatcoder.core.chatcoder import ChatCoder
+# 注意：导入路径已根据文件重命名进行更新
+from chatcoder.core.thinker import Thinker # <-- 从 thinker.py 导入 Thinker
+from chatcoder.core.coder import Coder    # <-- 从 coder.py 导入 Coder
 
 # --- 导入其他必要的模块 ---
 from chatcoder.utils.console import (
     console, info, success, warning, error,
     heading, show_welcome, confirm
 )
-
-try:
-    from chatcoder.init import init_project as perform_init_project, validate_config_content # 假设函数名已调整
-except ImportError:
-    # 如果移动了，尝试新的路径
-    try:
-        from chatcoder.init import init_project as perform_init_project, validate_config_content
-    except ImportError:
-        # 如果都找不到，可以给出更明确的错误或使用占位符
-        def perform_init_project(): raise NotImplementedError("init_project not found")
-        def validate_config_content(*args, **kwargs): raise NotImplementedError("validate_config_content not found")
-        error("Failed to import initialization functions. Please check chatcoder.init module.")
-
-# --- 导入上下文生成函数 (精简后备) ---
-from chatcoder.core.context import generate_project_context_from_data
 
 # ------------------------------
 # CLI 主入口
@@ -51,96 +38,106 @@ def cli(ctx):
 # ------------------------------
 # 命令 1: init
 # ------------------------------
+# 注意：这部分假设 init.py 的逻辑没有改变
+try:
+    from chatcoder.init import init_project as perform_init_project, validate_config_content
+except ImportError:
+    try:
+        from chatcoder.core.init import init_project as perform_init_project, validate_config_content
+    except ImportError:
+        def perform_init_project():
+            raise NotImplementedError("init_project function not found.")
+        def validate_config_content(*args, **kwargs):
+            raise NotImplementedError("validate_config_content function not found.")
+        error("Failed to import initialization functions. Please check your installation.")
+
 @cli.command()
 @click.pass_context
 def init(ctx):
-    """🔧 初始化项目配置"""
-    heading("项目初始化")
+    """🔧 Initialize project configuration"""
+    heading("Project Initialization")
     state_dir = Path(".chatcoder")
     config_file = state_dir / "config.yaml"
     context_file = state_dir / "context.yaml"
 
     if state_dir.exists() and context_file.exists():
-        if not confirm("配置已存在，重新初始化将覆盖。继续？", default=False):
-            info("已取消")
+        if not confirm("Configuration already exists. Re-initializing will overwrite. Continue?", default=False):
+            info("Cancelled.")
             return
     try:
-        # 调用 init 模块的函数进行交互和渲染 (不执行文件写入)
         config_content, context_content = perform_init_project()
 
-        # CLI 层执行文件系统操作
         state_dir.mkdir(exist_ok=True)
+        # 确保存储实例的目录也存在
+        (state_dir / "workflow_instances").mkdir(exist_ok=True)
 
-        # 写入 config.yaml
         if config_file.exists():
-            if confirm(f"{config_file} 已存在。是否覆盖？", default=False):
+            if confirm(f"{config_file} already exists. Overwrite?", default=False):
                 config_file.write_text(config_content, encoding="utf-8")
-                success(f"已更新: {config_file}")
+                success(f"Updated: {config_file}")
             else:
-                info(f"跳过更新: {config_file}")
+                info(f"Skipped update: {config_file}")
         else:
              config_file.write_text(config_content, encoding="utf-8")
-             success(f"已生成: {config_file}")
+             success(f"Generated: {config_file}")
 
-        # 写入 context.yaml
         if context_file.exists():
-            if confirm(f"{context_file} 已存在。是否覆盖？", default=False):
+            if confirm(f"{context_file} already exists. Overwrite?", default=False):
                 context_file.write_text(context_content, encoding="utf-8")
-                success(f"已更新: {context_file}")
+                success(f"Updated: {context_file}")
             else:
-                info(f"跳过更新: {context_file}")
+                info(f"Skipped update: {context_file}")
         else:
              context_file.write_text(context_content, encoding="utf-8")
-             success(f"已生成: {context_file}")
+             success(f"Generated: {context_file}")
 
-        success("初始化完成！")
+        success("Initialization complete!")
     except Exception as e:
-        error(f"初始化失败: {e}")
+        error(f"Initialization failed: {e}")
 
 # ------------------------------
-# 辅助函数：加载 ChatCoder 服务
+# 辅助函数：加载 Thinker 服务
 # ------------------------------
 
-def _load_chatcoder_service() -> ChatCoder:
+def _load_thinker_service() -> Thinker: # <-- 函数名更新
     """
-    辅助函数：加载配置文件并实例化 ChatCoder 服务。
+    Helper function: Load config files and instantiate the Thinker service.
     """
     config_file = Path(".chatcoder") / "config.yaml"
     context_file = Path(".chatcoder") / "context.yaml"
+    storage_dir = Path(".chatcoder") / "workflow_instances" # Add storage_dir
 
     if not config_file.exists() or not context_file.exists():
-        error("配置文件缺失。请先运行 `chatcoder init` 初始化项目。")
+        error("Configuration files missing. Please run `chatcoder init` first.")
         raise click.Abort()
 
     try:
         with open(config_file, 'r', encoding='utf-8') as f:
             config_data = yaml.safe_load(f) or {}
     except Exception as e:
-        error(f"读取 config.yaml 失败: {e}")
+        error(f"Failed to read config.yaml: {e}")
         raise click.Abort()
 
     try:
         with open(context_file, 'r', encoding='utf-8') as f:
             context_data = yaml.safe_load(f) or {}
     except Exception as e:
-        error(f"读取 context.yaml 失败: {e}")
+        error(f"Failed to read context.yaml: {e}")
         raise click.Abort()
 
-    # 实例化新的 ChatCoder 服务
-    return ChatCoder(config_data=config_data, context_data=context_data)
+    # Instantiate the new Thinker service
+    return Thinker(config_data=config_data, context_data=context_data, storage_dir=str(storage_dir))
 
 # ------------------------------
-# 命令 2: context (使用后备上下文生成)
+# 命令 2: context (显示原始配置文件内容)
 # ------------------------------
 
-@cli.command()
+@cli.command(name="context") # Rename to avoid conflict with group name if needed, or keep as is
 @click.pass_context
-def context(ctx):
-    """📚 查看项目上下文 (使用后备生成)"""
-    click.echo("🔍 正在生成上下文快照 (后备模式)...\n ")
-
+def show_context(ctx):
+    """📚 View raw project context (from .chatcoder/config.yaml and .chatcoder/context.yaml)"""
+    heading("Project Raw Configuration and Context")
     try:
-        # 1. 加载配置和上下文数据 (复用 _load_chatcoder_service 的加载逻辑)
         config_file = Path(".chatcoder") / "config.yaml"
         context_file = Path(".chatcoder") / "context.yaml"
         config_data = {}
@@ -152,57 +149,30 @@ def context(ctx):
              with open(context_file, 'r', encoding='utf-8') as f:
                  context_data = yaml.safe_load(f) or {}
 
-        # 2. 使用精简后的后备函数生成上下文
-        snapshot = generate_project_context_from_data(config_data=config_data, context_data=context_data)
-
-        # 3. 输出核心字段 (根据 generate_project_context_from_data 的返回结构调整)
-        keys_to_show = [
-            "project_language",
-            "project_type", # 假设 generate_project_context_from_data 会提供
-            "test_runner",
-            "format_tool",
-            # "core_files", # 来自旧 snapshot
-            # "context_snapshot" # 来自旧 snapshot
-        ]
-
-        # 打印用户定义和探测到的信息
-        for key in keys_to_show:
-            value = snapshot.get(key)
-            if value and value != "unknown":
-                click.echo(f"🔹 {key}: {value}")
-
-        # 打印 context.yaml 中的用户自定义部分
-        if context_data:
-            click.echo(f"\n### 📝 用户定义: ")
-            for k, v in context_data.items():
-                if v is not None: # 过滤 None 值
-                     click.echo(f"- {k}: {v}")
+        # Display config.yaml content
+        if config_data:
+            console.print("[bold cyan]### config.yaml Content:[/bold cyan]")
+            console.print_json(data=config_data)
         else:
-             click.echo("- 无用户定义上下文信息 ")
+            console.print("[yellow]config.yaml not found or empty.[/yellow]")
 
-        # 打印 core_patterns (如果有的话)
-        core_patterns = snapshot.get("core_patterns")
-        if core_patterns:
-             click.echo(f"\n### 🔍 配置的 Core Patterns: ")
-             for pattern in core_patterns:
-                 click.echo(f"- {pattern}")
-
-        # (可选) 打印后备生成的完整快照字符串 (如果函数还生成)
-        # snapshot_text = snapshot.get("context_snapshot")
-        # if snapshot_text:
-        #     click.echo(f"\n{snapshot_text}")
+        # Display context.yaml content
+        if context_data:
+            console.print("\n[bold cyan]### context.yaml Content:[/bold cyan]")
+            console.print_json(data=context_data)
+        else:
+             console.print("\n[yellow]context.yaml not found or empty.[/yellow]")
 
     except Exception as e:
-        click.echo(click.style(f"❌ 生成上下文失败: {e}", fg="red"))
+        error(f"Failed to read or display configuration files: {e}")
         raise click.Abort()
 
-
 # ------------------------------
-# feature 命令组
+# feature 命令组 (主要入口)
 # ------------------------------
 @cli.group()
 def feature():
-    """Manage features (grouped development workflows)"""
+    """🧠 Manage features (logical groupings of development workflows)"""
     pass
 
 @feature.command(name="start")
@@ -210,43 +180,45 @@ def feature():
 @click.option("--workflow", "-w", default="default", help="Workflow schema to use")
 @click.pass_context
 def feature_start(ctx, description: str, workflow: str):
-    """Start a new feature by creating the first task"""
-    chatcoder_service = _load_chatcoder_service()
+    """🚀 Start a new feature workflow"""
+    thinker_service = _load_thinker_service()
     try:
-        result = chatcoder_service.start_new_feature(description, workflow)
+        result = thinker_service.start_new_feature(description, workflow)
         feature_id = result['feature_id']
-        success(f"🚀 Started new feature: {feature_id}")
+        instance_id = result.get('instance_id', 'N/A')
+        success(f"Started new feature workflow: {feature_id}")
+        if instance_id != 'N/A':
+            info(f"   Initial Instance ID: {instance_id}")
         console.print(f"📝 Description: {description}", style="white")
         console.print(f"\n💡 Suggested next command:")
-        console.print(f"[dim]$[/dim] [cyan]chatcoder task prompt {feature_id}[/cyan]")
+        console.print(f"[dim]$[/dim] [cyan]chatcoder task prompt --feature {feature_id}[/cyan]")
     except Exception as e:
-        error(f"Cli Failed to start feature: {e}")
+        error(f"Failed to start feature: {e}")
 
 @feature.command(name="list")
 @click.pass_context
 def feature_list(ctx):
-    """List all features (grouped by feature_id)"""
-    chatcoder_service = _load_chatcoder_service()
+    """📋 List all features"""
+    thinker_service = _load_thinker_service()
     heading("Features List")
     try:
-        features_status = chatcoder_service.get_all_features_status()
-        if not features_status:
+        feature_ids = thinker_service.list_all_features()
+        if not feature_ids:
             console.print("No features found.", style="yellow")
             return
 
         table = Table(title="Features")
         table.add_column("Feature ID", style="cyan")
-        table.add_column("Description", style="white")
-        table.add_column("Status", style="green")
-        table.add_column("Progress", style="magenta")
+        table.add_column("Instances", style="blue")
 
-        for feature_info in features_status:
-             table.add_row(
-                 feature_info.get("feature_id", "N/A"),
-                 feature_info.get("description", "N/A"),
-                 feature_info.get("status", "unknown"),
-                 feature_info.get("progress", "N/A")
-             )
+        for fid in feature_ids:
+            try:
+                instances_info = thinker_service.get_feature_instances(fid)
+                instance_count = len(instances_info)
+            except Exception:
+                instance_count = "Error"
+            table.add_row(fid, str(instance_count))
+
         console.print(table)
     except Exception as e:
         error(f"Failed to list features: {e}")
@@ -255,134 +227,359 @@ def feature_list(ctx):
 @click.argument("feature_id")
 @click.pass_context
 def feature_status(ctx, feature_id: str):
-    """Show detailed status of a specific feature"""
-    heading(f"Feature Status: {feature_id}")
-    chatcoder_service = _load_chatcoder_service()
+    """📊 Show status of all instances associated with a feature"""
+    heading(f"Instances for Feature: {feature_id}")
+    thinker_service = _load_thinker_service()
     try:
-        detail_status = chatcoder_service.get_feature_detail_status(feature_id)
-        console.print_json(data=detail_status)
+        instances_status = thinker_service.get_feature_instances(feature_id)
+
+        if not instances_status:
+            console.print("No instances found for this feature.", style="yellow")
+            return
+
+        table = Table(title=f"Instances for Feature {feature_id}")
+        table.add_column("Instance ID", style="cyan")
+        table.add_column("Status", style="green")
+        table.add_column("Current Phase", style="magenta")
+        table.add_column("Progress", style="blue")
+        table.add_column("Updated At", style="white")
+
+        for instance_info in instances_status:
+             updated_at_ts = instance_info.get('updated_at', 0)
+             try:
+                 updated_at_str = datetime.fromtimestamp(updated_at_ts).strftime('%Y-%m-%d %H:%M:%S')
+             except:
+                 updated_at_str = "Invalid Date"
+
+             table.add_row(
+                 instance_info.get("instance_id", "N/A"),
+                 instance_info.get("status", "unknown"),
+                 instance_info.get("current_phase", "N/A"),
+                 f"{int(float(instance_info.get('progress', 0)) * 100)}%" if instance_info.get('progress') else "N/A",
+                 updated_at_str
+             )
+        console.print(table)
+
     except Exception as e:
         error(f"Failed to get status for feature {feature_id}: {e}")
 
-# @feature.command(name="delete") ... (如果需要实现)
+@feature.command(name="delete")
+@click.argument("feature_id")
+@click.pass_context
+def feature_delete(ctx, feature_id: str):
+    """🗑️ Delete a feature and all its associated instances"""
+    thinker_service = _load_thinker_service()
+    try:
+        success_deleted = thinker_service.delete_feature(feature_id)
+        if success_deleted:
+            success(f"Feature '{feature_id}' and its instances have been deleted.")
+        else:
+             info(f"No instances found for feature '{feature_id}' or deletion was not fully successful.")
+    except Exception as e:
+         error(f"Failed to delete feature {feature_id}: {e}")
 
 # ----------------------------
-# task 命令组
+# feature task 子命令组 (针对特定 feature 的任务操作)
+# ----------------------------
+@feature.group(name="task")
+@click.argument("feature_id")
+@click.pass_context
+def feature_task(ctx, feature_id: str):
+    """🛠️ Manage tasks within a specific feature (targets active instance)"""
+    ctx.ensure_object(dict)
+    ctx.obj['FEATURE_ID'] = feature_id
+    thinker_service = _load_thinker_service()
+    ctx.obj['THINKER_SERVICE'] = thinker_service
+    # Resolve active instance ID here for convenience in subcommands
+    try:
+        active_instance_id = thinker_service.get_active_instance_for_feature(feature_id)
+        if not active_instance_id:
+            raise click.ClickException(f"No active workflow instance found for feature '{feature_id}'.")
+        ctx.obj['ACTIVE_INSTANCE_ID'] = active_instance_id
+    except Exception as e:
+        raise click.ClickException(f"Error resolving active instance for feature '{feature_id}': {e}")
+
+@feature_task.command(name="status")
+@click.pass_context
+def feature_task_status(ctx):
+    """🔍 Show detailed status of the active task instance for the feature"""
+    feature_id = ctx.obj['FEATURE_ID']
+    instance_id = ctx.obj['ACTIVE_INSTANCE_ID']
+    heading(f"Active Task Instance Status for Feature '{feature_id}' (ID: {instance_id})")
+    thinker_service = ctx.obj['THINKER_SERVICE']
+    try:
+        detail_status = thinker_service.get_instance_detail_status(instance_id)
+        console.print_json(data=detail_status)
+    except Exception as e:
+        error(f"Failed to get status for instance {instance_id}: {e}")
+
+@feature_task.command(name="prompt")
+@click.pass_context
+def feature_task_prompt(ctx):
+    """🧾 Generate prompt for the current task of the feature's active instance"""
+    feature_id = ctx.obj['FEATURE_ID']
+    instance_id = ctx.obj['ACTIVE_INSTANCE_ID']
+    heading(f"Generating prompt for feature '{feature_id}' (active instance: {instance_id})")
+    thinker_service = ctx.obj['THINKER_SERVICE']
+    try:
+        prompt_content = thinker_service.generate_prompt_for_current_task(instance_id)
+        console.print(Panel(prompt_content, title=f"📋 Prompt for {feature_id} (Instance: {instance_id})", border_style="blue"))
+    except Exception as e:
+        error(f"Failed to generate prompt for instance {instance_id}: {e}")
+
+@feature_task.command(name="confirm")
+@click.option("--summary", help="Summary of the AI response or work done")
+@click.pass_context
+def feature_task_confirm(ctx, summary: str):
+    """✅ Confirm the current task for the feature's active instance and advance the workflow"""
+    feature_id = ctx.obj['FEATURE_ID']
+    instance_id = ctx.obj['ACTIVE_INSTANCE_ID']
+    thinker_service = ctx.obj['THINKER_SERVICE']
+    try:
+        result = thinker_service.confirm_task_and_advance(instance_id, summary)
+        success(f"✅ Task for instance {instance_id} (feature '{feature_id}') has been confirmed.")
+        if result:
+            next_phase = result.get('next_phase')
+            status = result.get('status')
+            returned_feature_id = result.get('feature_id')
+            if next_phase:
+                info(f"Next phase: {next_phase} (Status: {status})")
+                console.print(f"\n💡 Suggested next command:")
+                console.print(f"[dim]$[/dim] [cyan]chatcoder task prompt --feature {feature_id}[/cyan] (for next phase)")
+            else:
+                 info(f"Workflow instance {instance_id} (Feature: {returned_feature_id}) might be completed.")
+        else:
+             info("Advance was cancelled by user.")
+    except Exception as e:
+        error(f"Failed to confirm task for instance {instance_id}: {e}")
+
+@feature_task.command(name="preview")
+@click.argument("phase_name")
+@click.option("--description", "-d", default="", help="Task description for the preview")
+@click.pass_context
+def feature_task_preview(ctx, phase_name: str, description: str):
+    """🖼️ Preview the prompt for a specific phase of the feature's active instance"""
+    feature_id = ctx.obj['FEATURE_ID']
+    instance_id = ctx.obj['ACTIVE_INSTANCE_ID']
+    heading(f"Previewing prompt for phase '{phase_name}' of feature '{feature_id}' (instance: {instance_id})")
+    thinker_service = ctx.obj['THINKER_SERVICE']
+    try:
+        task_desc = description if description else f"Preview task in phase '{phase_name}'"
+        prompt_content = thinker_service.preview_prompt_for_phase(instance_id, phase_name, task_desc)
+        console.print(Panel(prompt_content, title=f"🖼️ Preview Prompt: {phase_name} ({feature_id})", border_style="green"))
+    except Exception as e:
+        error(f"Failed to preview prompt for phase '{phase_name}' of instance {instance_id}: {e}")
+
+@feature_task.command(name="apply")
+@click.argument("response_file", type=click.Path(exists=True))
+@click.pass_context
+def feature_task_apply(ctx, response_file: str):
+    """💾 Apply an AI response file to the current task of the feature's active instance"""
+    feature_id = ctx.obj['FEATURE_ID']
+    instance_id = ctx.obj['ACTIVE_INSTANCE_ID']
+    heading(f"Applying AI response for feature '{feature_id}' (instance: {instance_id})")
+    thinker_service = ctx.obj['THINKER_SERVICE'] # Needed to pass to Coder constructor
+    # 3. 实例化 Coder 服务
+    coder_service = Coder(thinker_service) # <-- 实例化 Coder，传入 Thinker
+
+    # 4. 读取 AI 响应文件内容
+    try:
+        response_content = Path(response_file).read_text(encoding='utf-8')
+    except FileNotFoundError:
+        error(f"AI response file not found: {response_file}")
+        raise click.Abort()
+    except Exception as e:
+        error(f"Failed to read AI response file '{response_file}': {e}")
+        raise click.Abort()
+
+    # 5. 调用 Coder 的 apply_task 方法
+    try:
+        success_applied = coder_service.apply_task(instance_id, response_content)
+
+        # 6. 根据结果输出信息
+        if success_applied:
+            success(f"AI response from '{response_file}' applied to instance '{instance_id}' (feature '{feature_id}').")
+        else:
+             warning(f"Apply task returned issues or partial success for instance {instance_id}. Check logs for details.")
+
+    except Exception as e:
+         error(f"Failed to apply AI response for instance {instance_id}: {e}")
+         raise click.Abort()
+
+# ----------------------------
+# task 命令组 (直接使用 instance_id, 保留用于高级/调试用途)
 # ----------------------------
 @cli.group()
 def task():
-    """Manage tasks within a feature"""
+    """⚙️ Manage tasks directly by instance ID (advanced/debugging)"""
     pass
 
+# --- 通用选项装饰器，用于 task 子命令 ---
+def common_task_options(f):
+    """为 task 子命令添加通用的 instance_id 或 feature_id 选项"""
+    f = click.option("--id", "instance_id", help="The workflow instance ID")(f)
+    f = click.option("--feature", "feature_id", help="The feature ID (will use its active instance)")(f)
+    return f
+
+def _resolve_instance_id(thinker_service: Thinker, instance_id: str, feature_id: str) -> str:
+    """Helper to resolve instance_id from either direct ID or feature ID."""
+    if not instance_id and not feature_id:
+        raise click.UsageError("Missing option '--id' or '--feature'.")
+    if instance_id and feature_id:
+        raise click.UsageError("Only one of '--id' or '--feature' can be provided.")
+
+    if feature_id:
+        active_id = thinker_service.get_active_instance_for_feature(feature_id)
+        if not active_id:
+            raise click.ClickException(f"Could not find active instance for feature '{feature_id}'.")
+        info(f"Using active instance '{active_id}' for feature '{feature_id}'.")
+        return active_id
+    return instance_id # Direct instance_id provided
+
 @task.command(name="prompt")
-@click.argument("feature_id")
+@common_task_options
 @click.pass_context
-def task_prompt(ctx, feature_id: str):
-    """Generate prompt for the current active task of a feature"""
-    heading(f"Generating prompt for feature: {feature_id}")
-    chatcoder_service = _load_chatcoder_service()
-    
+def task_prompt(ctx, instance_id: str, feature_id: str):
+    """🧾 Generate prompt for the current task of a workflow instance"""
+    thinker_service = _load_thinker_service()
+    instance_id = _resolve_instance_id(thinker_service, instance_id, feature_id)
+    heading(f"Generating prompt for instance: {instance_id}")
     try:
-        prompt_content = chatcoder_service.generate_prompt_for_current_task(feature_id)
-        console.print(Panel(prompt_content, title=f"📋 Prompt for {feature_id}", border_style="blue"))
+        prompt_content = thinker_service.generate_prompt_for_current_task(instance_id)
+        console.print(Panel(prompt_content, title=f"📋 Prompt for {instance_id}", border_style="blue"))
     except Exception as e:
-        error(f"Failed to generate prompt for feature {feature_id}: {e}")
+        error(f"Failed to generate prompt for instance {instance_id}: {e}")
 
 @task.command(name="confirm")
-@click.argument("feature_id")
+@common_task_options
 @click.option("--summary", help="Summary of the AI response or work done")
 @click.pass_context
-def task_confirm(ctx, feature_id: str, summary: str):
-    """Confirm the current task for a feature and advance the workflow"""
-    chatcoder_service = _load_chatcoder_service()
-    
+def task_confirm(ctx, instance_id: str, feature_id: str, summary: str):
+    """✅ Confirm the current task for an instance and advance the workflow"""
+    thinker_service = _load_thinker_service()
+    instance_id = _resolve_instance_id(thinker_service, instance_id, feature_id)
     try:
-        result = chatcoder_service.confirm_task_and_advance(feature_id, summary)
-        success(f"✅ Task for feature {feature_id} has been confirmed.")
+        result = thinker_service.confirm_task_and_advance(instance_id, summary)
+        success(f"✅ Task for instance {instance_id} has been confirmed.")
         if result:
             next_phase = result.get('next_phase')
-            reason = result.get('reason')
+            status = result.get('status')
+            feature_id_result = result.get('feature_id')
             if next_phase:
-                info(f"Recommended next phase: {next_phase} (Reason: {reason})")
+                info(f"Next phase: {next_phase} (Status: {status})")
                 console.print(f"\n💡 Suggested next command:")
-                console.print(f"[dim]$[/dim] [cyan]chatcoder task prompt {feature_id}[/cyan] (for next phase)")
+                console.print(f"[dim]$[/dim] [cyan]chatcoder task prompt --id {instance_id}[/cyan] (for next phase)")
+            else:
+                 info(f"Workflow instance {instance_id} (Feature: {feature_id_result}) might be completed.")
         else:
-             info(f"Feature {feature_id} might be completed.")
+             info("Advance was cancelled by user.")
     except Exception as e:
-        error(f"Failed to confirm task for feature {feature_id}: {e}")
+        error(f"Failed to confirm task for instance {instance_id}: {e}")
 
 @task.command(name="preview")
 @click.argument("phase_name")
-@click.argument("feature_id")
+@common_task_options
+@click.option("--description", "-d", default="", help="Task description for the preview")
 @click.pass_context
-def task_preview(ctx, phase_name: str, feature_id: str):
-    """(Debug) Preview the prompt for a specific phase of a feature"""
-    heading(f"Previewing prompt for phase '{phase_name}' of feature: {feature_id}")
-    chatcoder_service = _load_chatcoder_service() # 需要服务来加载 schema 路径
-    
+def task_preview(ctx, phase_name: str, instance_id: str, feature_id: str, description: str):
+    """🖼️ Preview the prompt for a specific phase of an instance"""
+    thinker_service = _load_thinker_service()
+    instance_id = _resolve_instance_id(thinker_service, instance_id, feature_id)
+    heading(f"Previewing prompt for phase '{phase_name}' of instance: {instance_id}")
     try:
-        prompt_content = chatcoder_service.preview_prompt_for_phase(phase_name, feature_id)
-        console.print(Panel(prompt_content, title=f"🖼️ Preview Prompt: {phase_name} ({feature_id})", border_style="green"))
+        task_desc = description if description else f"Preview task in phase '{phase_name}'"
+        prompt_content = thinker_service.preview_prompt_for_phase(instance_id, phase_name, task_desc)
+        console.print(Panel(prompt_content, title=f"🖼️ Preview Prompt: {phase_name} ({instance_id})", border_style="green"))
     except Exception as e:
-        error(f"Failed to preview prompt for phase '{phase_name}' of feature {feature_id}: {e}")
+        error(f"Failed to preview prompt for phase '{phase_name}' of instance {instance_id}: {e}")
 
 @task.command(name="apply")
-@click.argument("feature_id")
+@common_task_options
 @click.argument("response_file", type=click.Path(exists=True))
 @click.pass_context
-def task_apply(ctx, feature_id: str, response_file: str):
-    """Apply an AI response file to the current task of a feature.
-    
-    \b
-    Args:
-        feature_id: The ID of the feature.
-        response_file: Path to the file containing the AI's response.
-    """
-    heading(f"Applying AI response for feature: {feature_id}")
-    chatcoder_service = _load_chatcoder_service()
-    
+def task_apply(ctx, instance_id: str, feature_id: str, response_file: str):
+    """💾 Apply an AI response file to the current task of an instance"""
+    thinker_service = _load_thinker_service()
+    instance_id = _resolve_instance_id(thinker_service, instance_id, feature_id)
+    heading(f"Applying AI response for instance: {instance_id}")
+    # 3. 实例化 Coder 服务
+    coder_service = Coder(thinker_service) # <-- 实例化 Coder，传入 Thinker
+
+    # 4. 读取 AI 响应文件内容
     try:
-        # 读取 AI 响应文件内容
         response_content = Path(response_file).read_text(encoding='utf-8')
-        
-        # 调用 ChatCoder 服务应用响应
-        success_applied = chatcoder_service.apply_task(feature_id, response_content)
-        
-        if success_applied:
-            success(f"AI response from '{response_file}' applied to feature '{feature_id}'.")
-        else:
-             error(f"Failed to apply AI response for feature {feature_id}.")
-        
     except FileNotFoundError:
         error(f"AI response file not found: {response_file}")
+        raise click.Abort()
     except Exception as e:
-        error(f"Failed to apply AI response for feature {feature_id}: {e}")
+        error(f"Failed to read AI response file '{response_file}': {e}")
+        raise click.Abort()
+
+    # 5. 调用 Coder 的 apply_task 方法
+    try:
+        success_applied = coder_service.apply_task(instance_id, response_content)
+
+        # 6. 根据结果输出信息
+        if success_applied:
+            success(f"AI response from '{response_file}' applied to instance '{instance_id}'.")
+        else:
+             warning(f"Apply task returned issues or partial success for instance {instance_id}. Check logs for details.")
+
+    except Exception as e:
+         error(f"Failed to apply AI response for instance {instance_id}: {e}")
+         raise click.Abort()
+
+# ----------------------------
+# instance 命令组 (保留用于详细状态查看)
+# ----------------------------
+@cli.group()
+def instance():
+    """🔬 Inspect individual workflow instances (debugging)"""
+    pass
+
+@instance.command(name="status")
+@click.argument("instance_id")
+@click.pass_context
+def instance_status(ctx, instance_id: str):
+    """🔍 Show detailed status of a specific workflow instance"""
+    heading(f"Instance Status: {instance_id}")
+    thinker_service = _load_thinker_service()
+    try:
+        detail_status = thinker_service.get_instance_detail_status(instance_id)
+        console.print_json(data=detail_status)
+    except Exception as e:
+        error(f"Failed to get status for instance {instance_id}: {e}")
 
 # ----------------------------
 # workflow 命令组
 # ----------------------------
 @cli.group()
 def workflow():
-    """Manage workflows"""
+    """🔄 Manage workflow definitions"""
     pass
 
 @workflow.command(name="list")
 @click.pass_context
 def workflow_list(ctx):
-    """List all available workflow templates"""
+    """📄 List all available workflow templates"""
     heading("Available Workflows")
-    chatcoder_service = _load_chatcoder_service() # 需要服务来加载 schema 路径
-    
+    # ChatCoder v0.1 中移除了 list_available_workflows，直接扫描目录
+    workflows_dir = Path("ai-prompts") / "workflows"
+
     try:
-        workflow_names = chatcoder_service.list_available_workflows()
-        if not workflow_names:
+        if not workflows_dir.exists():
+             console.print(f"Workflows directory not found at {workflows_dir}", style="yellow")
+             return
+
+        workflow_files = list(workflows_dir.glob("*.yaml"))
+        if not workflow_files:
              console.print("No workflows found.", style="yellow")
              return
 
         table = Table(show_header=True, header_style="bold magenta")
         table.add_column("Name", style="cyan")
-        for name in workflow_names:
-             table.add_row(name)
+        for wf_file in workflow_files:
+             table.add_row(wf_file.stem)
         console.print(table)
     except Exception as e:
          error(f"Failed to list workflows: {e}")
@@ -393,16 +590,13 @@ def workflow_list(ctx):
 @cli.command(name="validate")
 @click.pass_context
 def config_validate(ctx):
-    """验证 config.yaml 是否合法"""
+    """✅ Validate config.yaml syntax"""
     heading("Validating Configuration")
-    
     try:
-        service = _load_chatcoder_service()
-        # 为了简化，我们调用 init 模块的函数来验证文件内容
         config_file = Path(".chatcoder") / "config.yaml"
         content = config_file.read_text(encoding="utf-8")
-        validate_config_content(content) # 使用 init.py 的验证函数
-        success("配置文件验证通过！")
+        validate_config_content(content)
+        success("Configuration file validated successfully!")
     except Exception as e:
         error(f"Validation failed unexpectedly: {e}")
 

@@ -1,359 +1,300 @@
 # tests/test_chatcontext.py
-"""
-ChatContext 库单元测试
-测试 chatcontext 核心模块的功能，包括 models, provider, providers, manager。
-"""
-
-import pytest
-import json
-import tempfile
+import unittest
+from unittest.mock import patch, MagicMock
+import sys
 import os
-from pathlib import Path
-from unittest.mock import MagicMock, patch
-from datetime import datetime
 
-# --- 导入 chatcontext 模块进行测试 ---
-try:
-    from chatcontext.core.models import (
-        ContextRequest, ProvidedContext, ContextType
-    )
-    from chatcontext.core.provider import IContextProvider
-    from chatcontext.core.providers import (
-        ProjectInfoProvider, CoreFilesProvider, _read_file_safely, _detect_project_type
-    )
-    from chatcontext.core.manager import ContextManager, IContextManager
-    CHATCONTEXT_AVAILABLE = True
-except ImportError as e:
-    CHATCONTEXT_AVAILABLE = False
-    pytest.skip(f"Skipping chatcontext tests: {e}", allow_module_level=True)
+# 将项目根目录添加到 sys.path 以便导入 chatcontext 包
+# 假设测试文件位于项目根目录下的 tests/ 文件夹中
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-# --- Fixtures ---
+# --- 导入待测试的 chatcontext 模块 ---
+from chatcontext.core.models import ContextRequest, ProvidedContext, FinalContext, ContextType
+from chatcontext.core.provider import IContextProvider
+from chatcontext.core.manager import ContextManager
 
-@pytest.fixture
-def temp_project_dir():
-    """提供一个临时项目目录，模拟 .chatcoder 文件夹。"""
-    with tempfile.TemporaryDirectory() as tmpdirname:
-        original_cwd = os.getcwd()
-        os.chdir(tmpdirname)
+# 导入示例 Provider (如果已实现)
+# from chatcontext.providers.project_info import ProjectInfoProvider
+# from chatcontext.providers.core_files import CoreFilesProvider
+
+
+class TestChatContextModels(unittest.TestCase):
+
+    def test_context_request_creation(self):
+        """测试 ContextRequest 模型创建"""
+        request = ContextRequest(
+            workflow_instance_id="wfi_abc123",  # 使用修改后的字段名
+            feature_id="feat_test",
+            current_phase="analyze",
+            task_description="Test task"
+        )
+        self.assertEqual(request.workflow_instance_id, "wfi_abc123")
+        self.assertEqual(request.feature_id, "feat_test")
+        self.assertEqual(request.current_phase, "analyze")
+        self.assertEqual(request.task_description, "Test task")
+        # 测试默认值
+        self.assertIsNone(request.automation_level)
+        self.assertFalse(request.is_preview)
+
+    def test_provided_context_creation(self):
+        """测试 ProvidedContext 模型创建"""
+        content = {"key": "value"}
+        ctx = ProvidedContext(
+            content=content,
+            context_type=ContextType.INFORMATIONAL,
+            provider_name="TestProvider"
+        )
+        self.assertEqual(ctx.content, content)
+        self.assertEqual(ctx.context_type, ContextType.INFORMATIONAL)
+        self.assertEqual(ctx.provider_name, "TestProvider")
+        # 测试 v1.1 默认值
+        self.assertEqual(ctx.relevance_score, 1.0)
+        self.assertIsNone(ctx.summary)
+        self.assertIsNone(ctx.size_estimate)
+
+    def test_final_context_creation(self):
+        """测试 FinalContext 模型创建"""
+        merged_data = {"final": "data"}
+        diagnostics = [{"provider": "TestProvider", "status": "success"}]
+        fc = FinalContext(
+            merged_data=merged_data,
+            provider_diagnostics=diagnostics,
+            generation_time=0.5,
+            total_size=100
+        )
+        self.assertEqual(fc.merged_data, merged_data)
+        self.assertEqual(fc.provider_diagnostics, diagnostics)
+        self.assertEqual(fc.generation_time, 0.5)
+        self.assertEqual(fc.total_size, 100)
+        # 测试默认值
+        self.assertEqual(fc.suggestions, [])
+
+
+class TestChatContextProvider(unittest.TestCase):
+
+    def test_abstract_provider_cannot_instantiate(self):
+        """测试抽象 Provider 无法实例化"""
+        with self.assertRaises(TypeError):
+            # 直接尝试实例化抽象基类应该失败
+            IContextProvider() # type: ignore
+
+    # 注意：如果提供了具体的 Provider 实现（如 ProjectInfoProvider），
+    # 可以在这里添加测试它们的实例化和默认方法行为的测试用例。
+    # 例如：
+    # def test_concrete_provider_instantiation(self):
+    #     """测试具体 Provider 可以实例化并具有默认方法"""
+    #     # 这需要实际的 Provider 实现已完成
+    #     # provider = ProjectInfoProvider()
+    #     # self.assertEqual(provider.name, "ProjectInfoProvider")
+    #     # self.assertEqual(provider.get_priority(ContextRequest(...)), 90)
+    #     # ... 测试其他默认方法
+    #     pass
+
+
+class TestChatContextManager(unittest.TestCase):
+
+    def setUp(self):
+        """在每个测试前设置"""
+        self.manager = ContextManager()
+
+    def test_register_provider(self):
+        """测试注册 Provider"""
+        # 创建一个模拟的 Provider 实例
+        mock_provider = MagicMock()
+        mock_provider.name = "MockProvider"
         
-        # 创建模拟的 .chatcoder 目录结构
-        chatcoder_dir = Path(".chatcoder")
-        chatcoder_dir.mkdir(exist_ok=True)
-        (chatcoder_dir / "tasks").mkdir(exist_ok=True)
+        self.manager.register_provider(mock_provider)
         
-        # 创建一个基本的 config.yaml
-        config_content = """
-project:
-  name: "Test Project"
-  language: "python"
-  type: "cli"
-core_patterns:
-  - "**/*.py"
-exclude_patterns: []
-"""
-        (chatcoder_dir / "config.yaml").write_text(config_content.strip(), encoding='utf-8')
+        # 检查 provider 是否被添加到内部列表中
+        # 注意：_providers 是私有属性，直接访问可能不被推荐，
+        # 但在单元测试中为了验证内部状态是可接受的。
+        self.assertIn(mock_provider, self.manager._providers)
 
-        # 创建一个基本的 context.yaml
-        context_content = """
-project_name: "Test Project"
-project_language: "python"
-project_type: "cli"
-framework: "None"
-test_runner: "pytest"
-format_tool: "black"
-"""
-        (chatcoder_dir / "context.yaml").write_text(context_content.strip(), encoding='utf-8')
+    def test_get_context_with_no_providers(self):
+        """测试没有 Provider 时的上下文生成"""
+        request = ContextRequest(
+            workflow_instance_id="wfi_empty",
+            feature_id="feat_empty",
+            current_phase="start",
+            task_description="No providers test"
+        )
+        result = self.manager.get_context(request)
+        
+        # 验证返回了 FinalContext 对象
+        self.assertIsInstance(result, FinalContext)
+        # 验证合并数据为空
+        self.assertEqual(result.merged_data, {})
+        # 验证总大小为0
+        self.assertEqual(result.total_size, 0)
+        # 验证生成时间非负
+        self.assertGreaterEqual(result.generation_time, 0)
+        # 应该没有诊断信息（因为没有 Provider 被调用）
+        self.assertEqual(len(result.provider_diagnostics), 0)
 
-        # 创建一些模拟的源代码文件用于上下文扫描
-        (Path("main.py")).write_text("# This is the main entry point\nprint('Hello')\n", encoding='utf-8')
-        (Path("utils.py")).write_text("# Utility functions\ndef helper():\n    pass\n", encoding='utf-8')
-        (Path("models.py")).write_text("# Data models\nclass User:\n    pass\n", encoding='utf-8')
+    def test_get_context_with_successful_provider(self):
+        """测试成功 Provider 的上下文生成"""
+        # 创建一个 Mock Provider
+        mock_provider = MagicMock()
+        mock_provider.name = "SuccessfulMockProvider"
+        # Mock v1.1 的可选方法
+        mock_provider.get_priority.return_value = 75
+        mock_provider.can_provide.return_value = True
+        mock_provider.get_supported_types.return_value = [ContextType.INFORMATIONAL]
+        mock_provider.get_supported_project_types.return_value = ['*']
 
-        try:
-            yield tmpdirname  # 将临时目录路径提供给测试函数
-        finally:
-            os.chdir(original_cwd) # 测试结束后恢复原始工作目录
+        # Mock provide 方法返回 ProvidedContext
+        mock_context = ProvidedContext(
+            content={"mock_key": "mock_value"},
+            context_type=ContextType.INFORMATIONAL,
+            provider_name="SuccessfulMockProvider",
+            relevance_score=0.8,
+            size_estimate=50
+        )
+        mock_provider.provide.return_value = [mock_context]
 
+        self.manager.register_provider(mock_provider)
 
-@pytest.fixture
-def sample_context_request():
-    """提供一个示例 ContextRequest。"""
-    return ContextRequest(
-        workflow_instance_id="feat_test_123",
-        phase_name="implement",
-        task_description="Implement user authentication",
-        previous_outputs={"task_id": "tsk_prev_456", "template": "design", "description": "Designed auth flow"},
-        user_inputs={"additional_info": "Use OAuth2"}
-    )
+        request = ContextRequest(
+            workflow_instance_id="wfi_success",
+            feature_id="feat_success",
+            current_phase="process",
+            task_description="Successful provider test"
+        )
+        result = self.manager.get_context(request)
 
+        # 验证 Mock 方法被调用
+        mock_provider.can_provide.assert_called_once_with(request)
+        # 注意：get_priority 是否在 manager 内部调用取决于具体实现
+        # mock_provider.get_priority.assert_called_once_with(request)
+        mock_provider.provide.assert_called_once_with(request)
 
-@pytest.fixture
-def sample_provided_context():
-    """提供一个示例 ProvidedContext。"""
-    return ProvidedContext(
-        content={"key": "value", "project_name": "Test Project"},
-        context_type=ContextType.GUIDING,
-        provider_name="test_provider",
-        metadata={"generated_at": datetime.now().isoformat()}
-    )
+        # 验证结果
+        self.assertIsInstance(result, FinalContext)
+        self.assertIn("mock_key", result.merged_data)
+        self.assertEqual(result.merged_data["mock_key"], "mock_value")
+        self.assertGreater(result.total_size, 0) # 应该累加 size_estimate
+        self.assertGreaterEqual(result.generation_time, 0)
+        
+        # 验证诊断信息
+        self.assertEqual(len(result.provider_diagnostics), 1)
+        diag = result.provider_diagnostics[0]
+        self.assertEqual(diag["provider"], "SuccessfulMockProvider")
+        self.assertEqual(diag["status"], "success")
+        self.assertGreaterEqual(diag["time_taken"], 0)
 
+    def test_get_context_with_failing_provider(self):
+        """测试失败 Provider 的错误隔离"""
+        # 成功的 Provider
+        mock_provider_ok = MagicMock()
+        mock_provider_ok.name = "OKProvider"
+        mock_provider_ok.can_provide.return_value = True
+        mock_provider_ok.get_priority.return_value = 50 # 可以设置优先级
+        mock_provider_ok.provide.return_value = [ProvidedContext(
+            content={"ok": "data"}, context_type=ContextType.INFORMATIONAL, provider_name="OKProvider"
+        )]
 
-# --- Tests for Models ---
+        # 失败的 Provider
+        mock_provider_fail = MagicMock()
+        mock_provider_fail.name = "FailProvider"
+        mock_provider_fail.can_provide.return_value = True
+        mock_provider_fail.get_priority.return_value = 40
+        # 模拟 provide 方法抛出异常
+        mock_provider_fail.provide.side_effect = Exception("Provider failed!")
 
-def test_context_type_enum():
-    """测试 ContextType 枚举。"""
-    assert ContextType.GUIDING.value == "guiding"
-    assert ContextType.INFORMATIONAL.value == "informational"
-    assert ContextType.ACTIONABLE.value == "actionable"
+        self.manager.register_provider(mock_provider_ok)
+        self.manager.register_provider(mock_provider_fail)
 
+        request = ContextRequest(
+            workflow_instance_id="wfi_fail",
+            feature_id="feat_fail",
+            current_phase="process",
+            task_description="Failing provider test"
+        )
+        result = self.manager.get_context(request)
 
-def test_context_request_creation(sample_context_request):
-    """测试 ContextRequest 的创建。"""
-    assert sample_context_request.workflow_instance_id == "feat_test_123"
-    assert sample_context_request.phase_name == "implement"
-    assert sample_context_request.task_description == "Implement user authentication"
-    assert sample_context_request.previous_outputs == {"task_id": "tsk_prev_456", "template": "design", "description": "Designed auth flow"}
-    assert sample_context_request.user_inputs == {"additional_info": "Use OAuth2"}
+        # 验证两个 Provider 的 can_provide 都被调用
+        mock_provider_ok.can_provide.assert_called_once_with(request)
+        mock_provider_fail.can_provide.assert_called_once_with(request)
 
+        # 验证成功的 Provider 被调用
+        mock_provider_ok.provide.assert_called_once_with(request)
+        # 验证失败的 Provider 被调用并抛出异常
+        mock_provider_fail.provide.assert_called_once_with(request)
 
-def test_provided_context_creation(sample_provided_context):
-    """测试 ProvidedContext 的创建。"""
-    assert sample_provided_context.content == {"key": "value", "project_name": "Test Project"}
-    assert sample_provided_context.context_type == ContextType.GUIDING
-    assert sample_provided_context.provider_name == "test_provider"
-    assert "generated_at" in sample_provided_context.metadata
+        # 验证结果：成功 Provider 的数据应该在
+        self.assertIn("ok", result.merged_data)
+        self.assertEqual(result.merged_data["ok"], "data")
+        
+        # 验证诊断信息：两个 Provider 都应该有记录
+        # 找到失败的诊断
+        fail_diag = next((d for d in result.provider_diagnostics if d["provider"] == "FailProvider"), None)
+        self.assertIsNotNone(fail_diag, "Diagnostics for failed provider should be present.")
+        self.assertEqual(fail_diag["status"], "error")
+        self.assertIn("Provider failed!", fail_diag["error"])
 
+    def test_provider_filtering_and_sorting(self):
+        """测试 Provider 的筛选和排序 (v1.1)"""
+        # 注意：这个测试的有效性取决于 ContextManager 内部是否实现了
+        # 基于 can_provide 和 get_priority 的筛选与排序逻辑。
+        # 当前提供的 manager.py 框架代码中包含了这部分逻辑的占位符。
 
-# --- Tests for Providers ---
+        # Provider 1: 优先级低, 可以提供
+        mock_provider_low_prio = MagicMock()
+        mock_provider_low_prio.name = "LowPrioProvider"
+        mock_provider_low_prio.get_priority.return_value = 20
+        mock_provider_low_prio.can_provide.return_value = True
+        mock_provider_low_prio.provide.return_value = [ProvidedContext(
+            content={"low": "prio"}, context_type=ContextType.INFORMATIONAL, provider_name="LowPrioProvider"
+        )]
 
-def test_project_info_provider_initialization():
-    """测试 ProjectInfoProvider 的初始化。"""
-    provider = ProjectInfoProvider()
-    assert provider.name == "project_info"
+        # Provider 2: 优先级高, 可以提供
+        mock_provider_high_prio = MagicMock()
+        mock_provider_high_prio.name = "HighPrioProvider"
+        mock_provider_high_prio.get_priority.return_value = 80
+        mock_provider_high_prio.can_provide.return_value = True
+        mock_provider_high_prio.provide.return_value = [ProvidedContext(
+            content={"high": "prio"}, context_type=ContextType.INFORMATIONAL, provider_name="HighPrioProvider"
+        )]
 
+        # Provider 3: 优先级中, 不能提供
+        mock_provider_cannot_provide = MagicMock()
+        mock_provider_cannot_provide.name = "CannotProvideProvider"
+        mock_provider_cannot_provide.can_provide.return_value = False # 关键：不能提供
+        # 不需要 mock provide，因为它不应该被调用
 
-def test_project_info_provider_provide(temp_project_dir, sample_context_request):
-    """测试 ProjectInfoProvider 的 provide 方法。"""
-    provider = ProjectInfoProvider()
-    provided_contexts = provider.provide(sample_context_request)
-    
-    assert isinstance(provided_contexts, list)
-    assert len(provided_contexts) == 1
-    
-    pc = provided_contexts[0]
-    assert isinstance(pc, ProvidedContext)
-    assert pc.provider_name == "project_info"
-    assert pc.context_type == ContextType.GUIDING
-    
-    content = pc.content
-    assert "project_name" in content
-    assert "project_language" in content
-    assert "project_type" in content
-    assert "framework" in content
-    assert "test_runner" in content
-    assert "format_tool" in content
-    assert content["project_name"] == "Test Project"
-    assert content["project_language"] == "python"
-    #assert content["project_type"] == "cli" # 或根据探测结果
-    assert content["test_runner"] == "pytest"
-    assert content["format_tool"] == "black"
-    provided_project_type = content.get("project_type", "unknown")
-    provided_framework = content.get("framework", "unknown")
-    
-    # 断言它们之间的一致性
-    if "django" in provided_project_type.lower():
-        assert provided_framework == "Django", f"Inconsistent framework for project_type '{provided_project_type}': expected 'Django', got '{provided_framework}'"
-    elif "fastapi" in provided_project_type.lower():
-        assert provided_framework == "FastAPI", f"Inconsistent framework for project_type '{provided_project_type}': expected 'FastAPI', got '{provided_framework}'"
-    elif provided_project_type == "cli":
-        # 对于 "cli" 类型，framework 通常应为 "None" 或 "unknown"
-        # 但具体取决于 ProjectInfoProvider 的实现细节
-        # 这里我们断言它不是 "Django" 或 "FastAPI"
-        assert provided_framework not in ["Django", "FastAPI"], f"Unexpected framework '{provided_framework}' for project_type 'cli'"
-        # 或者，如果我们期望是 "None"
-        # assert provided_framework == "None", f"Expected framework 'None' for project_type 'cli', got '{provided_framework}'"
+        self.manager.register_provider(mock_provider_low_prio)
+        self.manager.register_provider(mock_provider_high_prio)
+        self.manager.register_provider(mock_provider_cannot_provide)
 
-def test_core_files_provider_initialization():
-    """测试 CoreFilesProvider 的初始化。"""
-    provider = CoreFilesProvider()
-    assert provider.name == "core_files"
+        request = ContextRequest(
+            workflow_instance_id="wfi_sort",
+            feature_id="feat_sort",
+            current_phase="process",
+            task_description="Sorting test"
+        )
+        result = self.manager.get_context(request)
 
+        # 验证 cannot_provide 的 Provider 的 provide 没有被调用
+        mock_provider_cannot_provide.provide.assert_not_called()
+        
+        # 验证其他两个 Provider 的 provide 被调用了
+        # 调用顺序取决于 manager 的具体实现（是否按优先级排序后调用）
+        mock_provider_low_prio.provide.assert_called_once()
+        mock_provider_high_prio.provide.assert_called_once()
 
-def test_core_files_provider_provide(temp_project_dir, sample_context_request):
-    """测试 CoreFilesProvider 的 provide 方法。"""
-    provider = CoreFilesProvider()
-    provided_contexts = provider.provide(sample_context_request)
-    
-    assert isinstance(provided_contexts, list)
-    assert len(provided_contexts) >= 1 # 至少包含一个 core_files 条目
-    
-    # 查找 core_files 类型的 ProvidedContext
-    core_files_pc = None
-    for pc in provided_contexts:
-        if "core_files" in pc.content:
-            core_files_pc = pc
-            break
-            
-    assert core_files_pc is not None
-    assert core_files_pc.provider_name == "core_files"
-    assert core_files_pc.context_type == ContextType.INFORMATIONAL
-    
-    content = core_files_pc.content
-    assert "core_files" in content
-    core_files = content["core_files"]
-    assert isinstance(core_files, dict)
-    
-    # 检查是否扫描到了模拟的文件
-    assert "main.py" in [Path(p).name for p in core_files.keys()]
-    assert "utils.py" in [Path(p).name for p in core_files.keys()]
-    assert "models.py" in [Path(p).name for p in core_files.keys()]
-    
-    # 检查文件摘要
-    for file_path, info in core_files.items():
-        assert "hash" in info
-        assert "snippet" in info
-        # assert info["snippet"] != " <empty> " # 文件不为空，摘要不应为空
+        # 验证合并结果（简单合并逻辑下，后调用的会覆盖同名 key）
+        # 由于 manager 的合并逻辑未指定，我们只验证数据存在
+        self.assertIn("high", result.merged_data)
+        self.assertIn("low", result.merged_data)
 
-
-# --- Tests for Manager ---
-
-@pytest.fixture
-def context_manager():
-    """提供一个 ContextManager 实例。"""
-    return ContextManager()
-
-
-def test_context_manager_initialization(context_manager):
-    """测试 ContextManager 的初始化。"""
-    assert isinstance(context_manager, ContextManager)
-    assert isinstance(context_manager, IContextManager)
-    assert context_manager._providers == []
-
-
-def test_context_manager_register_provider(context_manager):
-    """测试 ContextManager 的 register_provider 方法。"""
-    provider_mock = MagicMock(spec=IContextProvider)
-    provider_mock.name = "mock_provider"
-    
-    context_manager.register_provider(provider_mock)
-    assert len(context_manager._providers) == 1
-    assert context_manager._providers[0] == provider_mock
+        # 验证诊断信息包含所有尝试过的 Provider (取决于 manager 实现)
+        # 至少应包含成功和失败的
+        diag_names = [d["provider"] for d in result.provider_diagnostics]
+        self.assertIn("HighPrioProvider", diag_names)
+        self.assertIn("LowPrioProvider", diag_names)
+        # CannotProvideProvider 是否在诊断中取决于 manager 是否记录被过滤的 Provider
 
 
-def test_context_manager_unregister_provider(context_manager):
-    """测试 ContextManager 的 unregister_provider 方法。"""
-    provider_mock1 = MagicMock(spec=IContextProvider)
-    provider_mock1.name = "mock_provider_1"
-    provider_mock2 = MagicMock(spec=IContextProvider)
-    provider_mock2.name = "mock_provider_2"
-    
-    context_manager.register_provider(provider_mock1)
-    context_manager.register_provider(provider_mock2)
-    
-    assert len(context_manager._providers) == 2
-    
-    result = context_manager.unregister_provider("mock_provider_1")
-    assert result is True
-    assert len(context_manager._providers) == 1
-    assert context_manager._providers[0].name == "mock_provider_2"
-    
-    result = context_manager.unregister_provider("non_existent_provider")
-    assert result is False
-    assert len(context_manager._providers) == 1
-
-
-def test_context_manager_list_providers(context_manager):
-    """测试 ContextManager 的 list_providers 方法。"""
-    provider_mock1 = MagicMock(spec=IContextProvider)
-    provider_mock1.name = "mock_provider_1"
-    provider_mock2 = MagicMock(spec=IContextProvider)
-    provider_mock2.name = "mock_provider_2"
-    
-    context_manager.register_provider(provider_mock1)
-    context_manager.register_provider(provider_mock2)
-    
-    providers = context_manager.list_providers()
-    assert isinstance(providers, list)
-    assert len(providers) == 2
-    assert "mock_provider_1" in providers
-    assert "mock_provider_2" in providers
-
-
-def test_context_manager_get_context(temp_project_dir, sample_context_request):
-    """测试 ContextManager 的 get_context 方法。"""
-    cm = ContextManager()
-    
-    # 注册真实的 providers
-    cm.register_provider(ProjectInfoProvider())
-    cm.register_provider(CoreFilesProvider())
-    
-    context = cm.get_context(sample_context_request)
-    
-    assert isinstance(context, dict)
-    assert "project_name" in context
-    assert "project_language" in context
-    assert "project_type" in context
-    assert "framework" in context
-    assert "test_runner" in context
-    assert "format_tool" in context
-    assert "core_files" in context
-    
-    # 检查是否包含了请求中的信息
-    assert context["feature_id"] == sample_context_request.workflow_instance_id
-    assert context["phase_name"] == sample_context_request.phase_name
-    assert context["task_description"] == sample_context_request.task_description
-    assert context["previous_outputs"] == sample_context_request.previous_outputs
-    assert context["user_inputs"] == sample_context_request.user_inputs
-
-
-# --- Tests for Internal Helpers (Optional but useful) ---
-
-def test_read_file_safely_success(temp_project_dir):
-    """测试 _read_file_safely 成功读取文件。"""
-    test_file = Path("test_file.txt")
-    test_content = "This is a test file.\nWith multiple lines."
-    test_file.write_text(test_content, encoding='utf-8')
-    
-    content = _read_file_safely(test_file)
-    assert content == test_content
-
-
-def test_read_file_safely_file_not_found(temp_project_dir):
-    """测试 _read_file_safely 文件不存在。"""
-    non_existent_file = Path("non_existent.txt")
-    content = _read_file_safely(non_existent_file)
-    assert content is None
-
-
-def test_read_file_safely_permission_error(temp_project_dir):
-    """测试 _read_file_safely 权限错误 (模拟)。"""
-    # 在某些平台上模拟权限错误比较困难，这里仅作示例
-    # 可以使用 mock 来模拟 open 抛出 PermissionError
-    with patch("builtins.open", side_effect=PermissionError("Permission denied")):
-        test_file = Path("test_file.txt")
-        test_file.write_text("content", encoding='utf-8') # 先创建文件
-        content = _read_file_safely(test_file)
-        assert content is None
-
-
-def test_detect_project_type_python_basic(temp_project_dir):
-    """测试 _detect_project_type 检测基本的 Python 项目。"""
-    # conftest.py 已经创建了 main.py 和 config.yaml (标记为 python)
-    # detector 会根据文件存在性判断
-    detected_type = _detect_project_type()
-    # 由于 main.py 存在，且没有更具体的框架文件，应该检测为 python
-    assert detected_type == "python"
-
-def test_detect_project_type_unknown(temp_project_dir):
-    """测试 _detect_project_type 检测未知项目类型。"""
-    # 删除所有可能触发检测的文件
-    Path("main.py").unlink(missing_ok=True)
-    Path(".chatcoder/config.yaml").unlink(missing_ok=True) # 不影响 detector
-    
-    # 创建一个不相关的文件
-    Path("README.md").write_text("# My Project", encoding='utf-8')
-    
-    detected_type = _detect_project_type()
-    # 项目中没有 .cpp, .cc 文件，也没有 main.py
-    # PROJECT_RULES 中没有匹配的，会 fallback 到 "unknown"
-    assert detected_type == "unknown"
+# --- 运行测试 ---
+if __name__ == '__main__':
+    unittest.main()
